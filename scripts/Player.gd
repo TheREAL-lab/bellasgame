@@ -47,10 +47,10 @@ var _was_grounded: bool = true
 
 func _ready() -> void:
 	NetworkManager.register_player(self)
-	name_label.text = player_name
+	visual.build(_species_index(), _my_color())
+	name_label.text = "%s the %s" % [player_name, visual.species_name()]
 	spring_arm.rotation.x = -0.30    # start looking slightly down at the character
-	visual.set_base_color(_my_color())
-
+	_take_lobby_position()
 	if is_bot:
 		camera.current = false
 		ai_controller.activate(self)
@@ -69,12 +69,34 @@ func _ready() -> void:
 	GameManager.player_tagged.connect(_on_player_tagged)
 
 
+## Spread everyone out the moment they spawn. Without this the whole cast is
+## stacked on the origin for a frame and physics flings them onto the scenery.
+func _take_lobby_position() -> void:
+	if not is_multiplayer_authority():
+		return
+	var arena = get_tree().get_first_node_in_group("arena_root")
+	if arena == null or arena.hider_spawns.is_empty():
+		return
+	var spawns: Array = arena.hider_spawns
+	global_position = spawns[absi(player_id) % spawns.size()]
+
+
 func _exit_tree() -> void:
 	NetworkManager.unregister_player(self)
 
 
 func _my_color() -> Color:
-	return PALETTE[abs(player_id) % PALETTE.size()]
+	return PALETTE[_slot() % PALETTE.size()]
+
+
+## Host is slot 0, joining players 1.., bots take the slots after that, so
+## nobody shares a species or colour with anybody else.
+func _slot() -> int:
+	return player_id - 1 if player_id > 0 else 1 - player_id
+
+
+func _species_index() -> int:
+	return _slot() % 6
 
 
 func is_hunter() -> bool:
@@ -91,7 +113,7 @@ func _on_game_state_changed(new_state: int) -> void:
 	if new_state == GameManager.State.HIDING:
 		is_tagged = false
 		visual.set_ghost(false)
-		set_collision_layer_value(1, true)
+		set_collision_layer_value(2, true)
 		if is_multiplayer_authority():
 			global_position = GameManager.spawn_point_for(player_id)
 			velocity = Vector3.ZERO
@@ -104,7 +126,7 @@ func _on_player_tagged(id: int) -> void:
 	is_tagged = true
 	visual.set_ghost(true)
 	visual.pop(-0.6)
-	set_collision_layer_value(1, false)
+	set_collision_layer_value(2, false)
 	poof.restart()
 	poof.emitting = true
 	_update_name_visibility()

@@ -5,7 +5,13 @@ A 3D hide-and-seek game built in Godot 4, made together with my step-daughter Be
 ## The game
 
 Five squishy characters — Bella, me, and three computer players — share a bright
-walled playground full of mushrooms, bushes, blocks and balloons.
+walled playground full of mushrooms, trees, bushes, rocks, candy canes, lamp
+posts, a pond, balloons and a rainbow over the back wall.
+
+Everybody is a **different** squishy: a bunny with tall ears and a puff tail, a
+kitty with pointed ears and a curling tail, a round bear with a snout, a wide
+froggy with eyes on top of its head, a little chick with a beak and a head tuft,
+and a puppy with floppy ears. Nobody shares a shape or a colour.
 
 - Every round, one player is picked at random to be **IT**.
 - IT waits in the middle while everyone else gets 10 seconds to scatter and hide.
@@ -47,7 +53,7 @@ a randomised boldness and hop frequency so the three don't move as a block.
 | `scripts/GameManager.gd` | Round state machine, role picking, tag detection, scores |
 | `scripts/Player.gd` | Movement, camera, and role/tag reactions — shared by humans and bots |
 | `scripts/AIController.gd` | Computer-player brain (hide, flee, search, chase) |
-| `scripts/Squishy.gd` | Builds the character out of primitives and does all the squash-and-stretch |
+| `scripts/Squishy.gd` | Builds each species out of primitives and does all the squash-and-stretch |
 | `scripts/Arena.gd` | Builds the playground, spawn points, decorations, and AI navigation |
 | `scripts/Main.gd` | Menu, lobby, HUD, and scoreboard |
 
@@ -64,9 +70,18 @@ round unattended — useful after making changes:
 /Users/natashavanegas/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . -- autotest
 ```
 
-It prints the players spawned, who got picked as IT, and how many hiders were
-caught. Setting `SHOT_DIR=/some/folder` and dropping `--headless` also saves
-screenshots of the hiding and seeking phases.
+It prints the players spawned, who got picked as IT, **how many bots are
+actually walking**, and how many hiders were caught. Setting `SHOT_DIR=/some/folder`
+and dropping `--headless` also saves screenshots of the hiding and seeking phases.
+
+The "bots moving" line exists because of a real bug: the navigation waypoints
+sat half a metre above the characters' feet, which was further than the agents'
+`path_desired_distance`, so they never registered arriving at a waypoint and
+stood still forever. If that count ever reads 0, the same class of bug is back.
+
+Everything here is generated from primitives in code — no downloaded art. That
+keeps the repo tiny, means there's no asset pipeline to break, and lets every
+colour and proportion be changed by editing a number.
 
 ## Ideas for next time
 

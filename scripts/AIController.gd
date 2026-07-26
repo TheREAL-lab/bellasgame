@@ -39,6 +39,11 @@ func _physics_process(delta: float) -> void:
 		parent.apply_ai_input(Vector2.ZERO, false)
 		return
 
+	# IT stands still and counts while everyone scatters.
+	if parent.is_hunter() and GameManager.state == GameManager.State.HIDING:
+		parent.apply_ai_input(Vector2.ZERO, false)
+		return
+
 	_repath_timer -= delta
 	_jump_cooldown -= delta
 
@@ -51,10 +56,6 @@ func _physics_process(delta: float) -> void:
 
 
 func _act_as_hunter(delta: float) -> void:
-	if GameManager.state == GameManager.State.HIDING:
-		parent.apply_ai_input(Vector2.ZERO, false)   # count while others hide
-		return
-
 	var visible_prey := _find_visible_hider()
 	if visible_prey != null:
 		# Small reaction delay so the bot doesn't feel robotically instant.
@@ -174,6 +175,7 @@ func _can_see(target: Node3D) -> bool:
 
 	var space := parent.get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(from, to)
+	query.collision_mask = 1     # only scenery blocks sight, never other players
 	query.exclude = [parent.get_rid(), target.get_rid()]
 	var hit := space.intersect_ray(query)
 	return hit.is_empty()

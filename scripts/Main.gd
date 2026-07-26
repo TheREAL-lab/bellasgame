@@ -62,6 +62,8 @@ func _run_smoke_test() -> void:
 	await get_tree().create_timer(2.0).timeout
 	print("[test] state=", GameManager.state, " hunter=", GameManager.hunter_id,
 		" hiders=", GameManager.hider_ids)
+	await get_tree().create_timer(3.0).timeout
+	print("[test] bots moving: ", _bots_moving(), "/3")
 	await _shoot("hiding")
 	await get_tree().create_timer(14.0).timeout
 	print("[test] seeking. remaining=", GameManager.hiders_remaining(),
@@ -71,6 +73,18 @@ func _run_smoke_test() -> void:
 	print("[test] later. remaining=", GameManager.hiders_remaining(),
 		" tagged=", GameManager.tagged.size(), " state=", GameManager.state)
 	get_tree().quit()
+
+
+## Counts bots that are actually walking. A navmesh or authority regression
+## shows up here as 0, which is exactly the bug that once froze every bot.
+func _bots_moving() -> int:
+	var moving := 0
+	for id in NetworkManager.players:
+		var p = NetworkManager.players[id]
+		if is_instance_valid(p) and p.is_bot \
+				and Vector2(p.velocity.x, p.velocity.z).length() > 0.5:
+			moving += 1
+	return moving
 
 
 func _shoot(label: String) -> void:
@@ -99,7 +113,7 @@ func _process(delta: float) -> void:
 		return
 
 	var seconds: int = int(ceil(GameManager.time_left))
-	timer_label.text = "%d:%02d" % [seconds / 60, seconds % 60]
+	timer_label.text = "%d:%02d" % [floori(seconds / 60.0), seconds % 60]
 	remaining_label.text = "Still hiding: %d" % GameManager.hiders_remaining()
 
 	# Last ten seconds of the hide phase count down big on screen.
