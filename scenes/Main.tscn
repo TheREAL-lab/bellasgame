@@ -1,0 +1,174 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/Main.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/Arena.tscn" id="2"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1")
+
+[node name="Arena" parent="." instance=ExtResource("2")]
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="MenuPanel" type="Control" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/MenuPanel"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -170.0
+offset_top = -160.0
+offset_right = 170.0
+offset_bottom = 160.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="TitleLabel" type="Label" parent="UI/MenuPanel/VBox"]
+theme_override_font_sizes/font_size = 40
+horizontal_alignment = 1
+text = "Bella's Game"
+
+[node name="NameEdit" type="LineEdit" parent="UI/MenuPanel/VBox"]
+placeholder_text = "Your name"
+
+[node name="HostButton" type="Button" parent="UI/MenuPanel/VBox"]
+text = "Host Game"
+
+[node name="JoinRow" type="HBoxContainer" parent="UI/MenuPanel/VBox"]
+theme_override_constants/separation = 8
+
+[node name="IPEdit" type="LineEdit" parent="UI/MenuPanel/VBox/JoinRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "IP address"
+text = "127.0.0.1"
+
+[node name="JoinButton" type="Button" parent="UI/MenuPanel/VBox/JoinRow"]
+text = "Join Game"
+
+[node name="StatusLabel" type="Label" parent="UI/MenuPanel/VBox"]
+horizontal_alignment = 1
+autowrap_mode = 2
+text = ""
+
+[node name="LobbyPanel" type="Control" parent="UI"]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/LobbyPanel"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -170.0
+offset_top = -140.0
+offset_right = 170.0
+offset_bottom = 140.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="LobbyTitle" type="Label" parent="UI/LobbyPanel/VBox"]
+theme_override_font_sizes/font_size = 28
+horizontal_alignment = 1
+text = "Waiting to start..."
+
+[node name="IPLabel" type="Label" parent="UI/LobbyPanel/VBox"]
+visible = false
+horizontal_alignment = 1
+autowrap_mode = 2
+text = ""
+
+[node name="PlayersLabel" type="Label" parent="UI/LobbyPanel/VBox"]
+horizontal_alignment = 1
+text = ""
+
+[node name="StartButton" type="Button" parent="UI/LobbyPanel/VBox"]
+visible = false
+text = "Start Round!"
+
+[node name="HUD" type="Control" parent="UI"]
+visible = false
+mouse_filter = 2
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="RoleLabel" type="Label" parent="UI/HUD"]
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 520.0
+offset_bottom = 60.0
+theme_override_font_sizes/font_size = 24
+text = ""
+
+[node name="TimerLabel" type="Label" parent="UI/HUD"]
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -120.0
+offset_top = 20.0
+offset_right = -24.0
+offset_bottom = 70.0
+theme_override_font_sizes/font_size = 36
+horizontal_alignment = 2
+text = "0"
+
+[node name="StatusFooter" type="Label" parent="UI/HUD"]
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -200.0
+offset_top = -80.0
+offset_right = 200.0
+offset_bottom = -30.0
+grow_vertical = 0
+theme_override_font_sizes/font_size = 26
+horizontal_alignment = 1
+text = ""
+
+[node name="RoundOverPanel" type="Control" parent="UI"]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/RoundOverPanel"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -170.0
+offset_top = -100.0
+offset_right = 170.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 14
+
+[node name="ResultLabel" type="Label" parent="UI/RoundOverPanel/VBox"]
+theme_override_font_sizes/font_size = 32
+horizontal_alignment = 1
+text = ""
+
+[node name="PlayAgainButton" type="Button" parent="UI/RoundOverPanel/VBox"]
+visible = false
+text = "Play Again"
+
+[node name="BackToMenuButton" type="Button" parent="UI/RoundOverPanel/VBox"]
+text = "Quit"
