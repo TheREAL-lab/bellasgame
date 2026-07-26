@@ -2,35 +2,75 @@
 
 A 3D hide-and-seek game built in Godot 4, made together with my step-daughter Bella.
 
-## The idea
+## The game
 
-- 5 players total: Bella, me, and 3 AI-controlled squishbots.
-- Multiplayer over LAN, so Bella and I can play together on our own devices.
-- Each round, one random player (human or AI) is picked as the Hunter — everyone else hides.
-- Hiders scatter for 8 seconds while the Hunter waits, then the Hunter has 90 seconds to tag everyone.
-- Cute, squishy characters (they squash and stretch when they walk, jump, and get tagged) in bright candy colors.
+Five squishy characters — Bella, me, and three computer players — share a bright
+walled playground full of mushrooms, bushes, blocks and balloons.
 
-## Project structure
+- Every round, one player is picked at random to be **IT**.
+- IT waits in the middle while everyone else gets 10 seconds to scatter and hide.
+- Then IT has 90 seconds to find and tag everyone.
+- Tagged players pop into a floating ghost and cheer on whoever's left.
+- Wins are tallied across rounds, and the same player won't be IT twice in a row.
 
-- `project.godot` — engine config, input map (WASD + mouse + Space to jump), autoloads.
-- `scripts/NetworkManager.gd` — hosting/joining over ENet, spawns human + AI players.
-- `scripts/GameManager.gd` — server-authoritative round state machine (lobby → hiding → seeking → round over), role assignment, and tag detection.
-- `scripts/Player.gd` — movement, camera, squish animations; shared by human and AI players.
-- `scripts/AIController.gd` — bot brain: hiders path to a hiding spot and sit tight, the Hunter patrols and chases the nearest hider.
-- `scripts/Arena.gd` — bakes AI navigation at runtime and lists hiding-spot positions.
-- `scripts/Main.gd` — menu, lobby, HUD, and round-over screens.
-- `scenes/Player.tscn`, `scenes/Arena.tscn`, `scenes/Main.tscn` — the corresponding scenes.
+Little touches that make it fun: characters squash and stretch as they run and
+jump, their ears flop, they blink, IT glows red, the screen edges blush red when
+IT is sneaking up behind you, and a big countdown ticks down the last ten
+seconds of hiding time.
 
-## How to run it
+## How to play
 
-1. Open this folder in the Godot 4 editor (built and tested against Godot 4.7).
-2. Press Play. One person clicks **Host Game**; the app shows a LAN IP to share.
-3. The other person enters that IP and clicks **Join Game**.
-4. Once both are in the lobby, the host clicks **Start Round!**.
-5. Move with WASD, look around with the mouse, jump with Space.
+**Move** with `W A S D` · **Look** with the mouse · **Jump** with `Space` ·
+`Esc` frees the mouse cursor.
 
-You can also playtest solo against the 3 AI bots without a second player.
+1. Open the project in Godot 4 (built and tested on Godot 4.7) and press Play.
+2. One person types a name and clicks **Play / Host Game**. The lobby shows an
+   address like `192.168.1.42`.
+3. The other person types that address and clicks **Join**.
+4. The host clicks **Start the round!**
 
-## Status
+You can also play solo against the three computer players — just host and start.
 
-Core loop (hosting/joining, roles, hiding/seeking timers, tagging, AI bots, squishy look) is implemented and loads cleanly in Godot's headless mode. Not yet play-tested end-to-end in the editor — next step is opening it in Godot and trying a real round.
+## How the computer players think
+
+They aren't on rails. As hiders they pick cover, and bolt for somewhere safer if
+IT gets within five metres. As IT they sweep the playground, and only chase what
+they can actually see — there's a vision cone and a line-of-sight check, so you
+really can break their line of sight by ducking behind a mushroom. Each one gets
+a randomised boldness and hop frequency so the three don't move as a block.
+
+## Project layout
+
+| File | What it does |
+| --- | --- |
+| `scripts/NetworkManager.gd` | Hosting, joining, and spawning players so identity replicates to every peer |
+| `scripts/GameManager.gd` | Round state machine, role picking, tag detection, scores |
+| `scripts/Player.gd` | Movement, camera, and role/tag reactions — shared by humans and bots |
+| `scripts/AIController.gd` | Computer-player brain (hide, flee, search, chase) |
+| `scripts/Squishy.gd` | Builds the character out of primitives and does all the squash-and-stretch |
+| `scripts/Arena.gd` | Builds the playground, spawn points, decorations, and AI navigation |
+| `scripts/Main.gd` | Menu, lobby, HUD, and scoreboard |
+
+The playground and the characters are generated in code rather than modelled, so
+colours, props and proportions can be tweaked by editing a table at the top of
+`Arena.gd` or the constants in `Squishy.gd`.
+
+## Checking it still works
+
+There's a headless smoke test that hosts a game against the bots and plays a
+round unattended — useful after making changes:
+
+```bash
+/Users/natashavanegas/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . -- autotest
+```
+
+It prints the players spawned, who got picked as IT, and how many hiders were
+caught. Setting `SHOT_DIR=/some/folder` and dropping `--headless` also saves
+screenshots of the hiding and seeking phases.
+
+## Ideas for next time
+
+- Sound effects and music
+- Power-ups (a short speed boost, or a peek at where IT is)
+- More playgrounds to choose from
+- Letting players pick their own colour in the lobby
