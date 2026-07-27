@@ -56,7 +56,10 @@ func _ready() -> void:
 ## plays a round unattended, so the whole loop can be checked without a human.
 func _run_smoke_test() -> void:
 	await get_tree().process_frame
-	NetworkManager.host_game("SmokeTester")
+	if not NetworkManager.host_game("SmokeTester"):
+		print("[test] FAILED to host -- is the port already in use?")
+		get_tree().quit()
+		return
 	print("[test] players spawned: ", NetworkManager.players.size())
 	GameManager.start_round()
 	await get_tree().create_timer(2.0).timeout
@@ -129,7 +132,9 @@ func _process(delta: float) -> void:
 
 
 func _on_host_pressed() -> void:
-	NetworkManager.host_game(_chosen_name())
+	if not NetworkManager.host_game(_chosen_name()):
+		status_label.text = "Couldn't start a game. Is Bella's Game already open in another window?"
+		return
 	ip_label.text = "Others join with this address:\n%s" % NetworkManager.get_local_ip()
 	ip_label.visible = true
 	start_button.visible = true

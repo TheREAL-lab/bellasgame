@@ -28,20 +28,23 @@ func _ready() -> void:
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 
 
-func host_game(player_name: String) -> void:
+## Returns false if the port is already taken -- usually a second copy of the
+## game already running. The caller must not show the lobby in that case.
+func host_game(player_name: String) -> bool:
 	local_player_name = player_name
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_server(PORT, MAX_HUMAN_PLAYERS)
 	if err != OK:
 		push_error("Failed to host game: %s" % err)
 		connection_failed.emit()
-		return
+		return false
 	multiplayer.multiplayer_peer = peer
 	is_hosting = true
 	player_names[1] = player_name
 	_spawn_player(1, player_name, false)
 	_spawn_ai_bots()
 	player_list_changed.emit()
+	return true
 
 
 func join_game(address: String, player_name: String) -> void:

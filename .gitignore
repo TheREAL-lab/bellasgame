@@ -2,7 +2,12 @@
 .godot/
 .import/
 export.cfg
-export_presets.cfg
+
+# export_presets.cfg IS tracked -- it holds no credentials and makes the
+# desktop build reproducible. Keep signing secrets out of it.
+
+# Built app bundles
+build/
 
 # Imported translations (automatically generated from CSV files)
 *.translation
