@@ -56,6 +56,8 @@ a randomised boldness and hop frequency so the three don't move as a block.
 | `scripts/Squishy.gd` | Builds each species out of primitives and does all the squash-and-stretch |
 | `scripts/Arena.gd` | Builds the playground, spawn points, decorations, and AI navigation |
 | `scripts/Main.gd` | Menu, lobby, HUD, and scoreboard |
+| `tests/` | Headless test suite — a tiny runner plus one file per area |
+| `scripts/run_tests.sh` | Finds Godot and runs the suite |
 
 The playground and the characters are generated in code rather than modelled, so
 colours, props and proportions can be tweaked by editing a table at the top of
@@ -63,21 +65,43 @@ colours, props and proportions can be tweaked by editing a table at the top of
 
 ## Checking it still works
 
-There's a headless smoke test that hosts a game against the bots and plays a
-round unattended — useful after making changes:
-
 ```bash
-/Users/natashavanegas/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . -- autotest
+./scripts/run_tests.sh                  # the whole suite, headless, a couple of seconds
+./scripts/run_tests.sh --filter=vision  # one file, or one test
+./scripts/run_tests.sh --smoke          # play a whole round against the bots
 ```
 
-It prints the players spawned, who got picked as IT, **how many bots are
-actually walking**, and how many hiders were caught. Setting `SHOT_DIR=/some/folder`
-and dropping `--headless` also saves screenshots of the hiding and seeking phases.
+The script finds Godot on your `PATH` or in the usual macOS spot; set `GODOT` to
+point at a specific build. The same two commands run in CI on every push.
+
+Tests live in `tests/`, one file per area, and the runner exits non-zero when
+anything is wrong — so a red suite actually stops a merge. Adding a test means
+dropping a `test_*.gd` file into `tests/unit/` with methods named `test_*`;
+there's no framework to install.
+
+**Known bugs are recorded as tests.** A test that documents a bug we haven't
+fixed calls `expect_failure("...")` and is reported as `XFAIL` instead of
+breaking the build. If someone fixes the underlying bug, that test starts
+passing and the runner fails with `XPASS`, so the stale expectation gets deleted
+along with the bug. Run the suite to see the current list; the big one is that
+characters are yawed to face *away* from the direction they're walking, which
+also points the bots' vision cones out of the backs of their heads.
+
+### The smoke test
+
+`--smoke` hosts a game against the bots and plays a round unattended. It prints
+the players spawned, who got picked as IT, **how many bots are actually
+walking**, and how many hiders were caught. Setting `SHOT_DIR=/some/folder` and
+dropping `--headless` also saves screenshots of the hiding and seeking phases.
 
 The "bots moving" line exists because of a real bug: the navigation waypoints
 sat half a metre above the characters' feet, which was further than the agents'
 `path_desired_distance`, so they never registered arriving at a waypoint and
 stood still forever. If that count ever reads 0, the same class of bug is back.
+
+It still only *prints* its findings, so it catches a crash but not a wrong
+answer — moving it into `tests/integration/` with real assertions is the next
+job.
 
 Everything here is generated from primitives in code — no downloaded art. That
 keeps the repo tiny, means there's no asset pipeline to break, and lets every

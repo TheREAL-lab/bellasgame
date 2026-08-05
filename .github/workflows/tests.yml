@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gdscript:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: "4.7-stable"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the Godot binary
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-bin
+          key: godot-${{ env.GODOT_VERSION }}-linux
+
+      - name: Download Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot-bin && cd ~/godot-bin
+          curl -fsSL -o godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}_linux.x86_64" godot
+          chmod +x godot
+
+      - name: Run the test suite
+        run: GODOT="$HOME/godot-bin/godot" ./scripts/run_tests.sh
+
+      # Plays a full round against the bots. It only asserts by printing, so
+      # today it catches hard crashes rather than wrong answers -- but it is
+      # still the only thing that exercises navigation baking end to end.
+      # Worth moving into tests/integration and giving real assertions.
+      - name: Run the smoke test
+        run: GODOT="$HOME/godot-bin/godot" ./scripts/run_tests.sh --smoke
