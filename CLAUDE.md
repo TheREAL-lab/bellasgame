@@ -104,12 +104,15 @@ line is guarding:
   match (roughly 30 → 70 armed). If they stay flat, the pickup sweep in
   `Loot._sweep()` or the loot table has broken.
 - `frame avg / worst` — logic cost with a hundred bots thinking. Around 7 ms
-  headless. **This measures CPU only; the container has no display, so render
+  headless (the first sample can spike while a hundred squishies are still
+  being built). **This measures CPU only; the container has no display, so render
   cost is never exercised by any of this.**
 - `positions ok=` — nobody fell through the island or walked into the sea.
 - `finished after Ns. winner=` — a match that never resolves is a real failure
   mode, so the test waits for a winner rather than assuming one turns up. A
-  healthy match ends around 180–220 s.
+  healthy match ends around 200–270 s. This line has actually caught it: two
+  hurt bots inside the last circle, each retreating from the other, with a storm
+  that had stopped closing. See `_close_the_last_circle` below.
 
 If you touch navigation, authority, spawning, combat or the match flow, run this
 and report the numbers.
@@ -197,6 +200,13 @@ from a wall costs nothing on the wire. Each phase holds (`wait`), then closes
 so running for the middle is never wrong, only slow. Damage outside is applied
 server-side on a 0.5 s tick rather than every frame.
 
+After the programmed `PHASES` run out the wall does **not** hold — it keeps
+creeping shut to nothing over `FINAL_CLOSE_TIME` (`_close_the_last_circle`).
+This is what guarantees a match ends: no matter how passive the survivors are,
+the circle eventually reaches zero, everyone is outside it, and the storm
+resolves it. Bots also stop retreating once the circle is under `RETREAT_ROOM`,
+because there is nowhere left to run to.
+
 Tuning lives in `MatchManager.PHASES` and `MAX_HEALTH`.
 
 ### Combat and loot
@@ -223,9 +233,21 @@ Tuning lives in `MatchManager.PHASES` and `MAX_HEALTH`.
 
 The shape of this file is dictated by there being a hundred of them. Anything
 expensive — target search, line-of-sight rays, asking the navigation server for
-a path — happens on a staggered `_think()` tick (~0.28 s, offset per bot at
-`activate()`); per frame a bot does little more than steer along the path it has.
-Repaths are additionally rate-limited in `_go_to`.
+a path — happens on a staggered `_think()` tick, offset per bot at `activate()`;
+per frame a bot does little more than steer along the path it has. Repaths are
+additionally rate-limited in `_go_to`.
+
+**Thinking is LOD'd by relevance**, the way the big battle royales afford their
+crowds: `_think_interval()` returns 0.28 s / 0.7 s / 1.5 s by distance to the
+nearest human (`NetworkManager.distance_to_nearest_human`), and past `LOS_RANGE`
+a bot skips its line-of-sight raycast entirely and trusts the vision cone. Two
+things this got wrong the first time, both worth keeping in mind if you touch it:
+
+- A slow-thinking bot that *arrives* somewhere must re-think immediately rather
+  than wait out its timer, or distant bots stand on their destination looking
+  lost — `bots moving` dropped from 64 to 43 before `_follow_path` was made to
+  reset `_think_timer` on arrival.
+- Slower thinking made the endgame passive enough to stall outright.
 
 Priority: **storm > retreat if hurt > fight if provoked > loot > hunt**. Two
 rules in there are load-bearing for pacing, and both were added because the
@@ -245,12 +267,14 @@ Two layers, because a hundred bots is genuinely a lot to ask of a laptop:
 - **`SaveData.bot_count`** (25/50/100, cycled from the menu, **default 50**).
   A first run should never be the heaviest thing the machine has ever drawn.
   The smoke test overrides this to 100 so the test always runs the worst case.
-- **`Main._tend_performance()`** watches smoothed frame time during a match and
-  sheds load in stages if it stays past `GUARD_BAD_MS` for `GUARD_SAMPLE`
-  seconds: shadows off → `scaling_3d_scale` 0.75 → 0.6, winding
-  `MatchManager.detail_scale` down alongside. It tells the player what it did and
-  suggests fewer bots on the results screen. Stages don't reverse within a match,
-  which is fine — it only ever fires on a machine that is already struggling.
+- **`Main._tend_performance()`** is dynamic resolution, aimed at a frame budget
+  rather than exposed as a settings menu: it moves `scaling_3d_scale` between
+  `SCALE_MIN` and 1.0 to hold `BUDGET_MS`, and drops the sun's shadows only once
+  the render scale is already floored and frames are still past
+  `SHADOW_DROP_MS`. **It recovers in both directions** — the first version only
+  ever went down, so one busy moment left the rest of the match soft for no
+  reason. It suggests fewer bots on the results screen if it ended up at the
+  floor.
 
 Nothing a game does can damage a Mac; the honest worst case is heat, fan noise
 and an unresponsive window. The guard exists so it stays *playable*, not safe.

@@ -95,6 +95,21 @@ func unregister_player(node: Node3D) -> void:
 	player_list_changed.emit()
 
 
+## How far the nearest pair of human eyes is. Bots use this to decide how hard to
+## think: nobody can tell that a squishy eighty metres away is reasoning about its
+## life twice a second instead of four times.
+func distance_to_nearest_human(pos: Vector3) -> float:
+	var best := INF
+	for id in players.keys():
+		if id < 0:
+			continue
+		var node = players[id]
+		if node == null or not is_instance_valid(node) or node.is_bot:
+			continue
+		best = minf(best, pos.distance_to(node.global_position))
+	return best
+
+
 func human_count() -> int:
 	var count := 0
 	for id in player_names.keys():

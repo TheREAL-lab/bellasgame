@@ -7,14 +7,20 @@ extends Node3D
 const HURT_FLASH := Color(1.0, 0.3, 0.3)
 const STORM_FLASH := Color(0.78, 0.42, 1.0)
 
-## Performance guard. If frames stay this expensive for this long, the game
-## starts turning its own sparkle down rather than letting a laptop grind.
+## Dynamic resolution, the way the big shooters do it: rather than a menu of
+## quality settings nobody reads, aim at a frame budget and move the 3D render
+## scale to hit it, every frame, in both directions. Recovering matters -- the
+## first version of this only ever went down, so one busy moment left the whole
+## rest of the match soft for no reason.
+##
 ## Nothing here can damage a machine -- the worst a slow frame rate does is make
 ## the fans loud -- but a game that has become a slideshow is no fun either, and
 ## a five-year-old should not have to know what a graphics setting is.
-const GUARD_BAD_MS := 40.0        # 25 fps
-const GUARD_SAMPLE := 3.0
-const GUARD_STAGES := 3
+const BUDGET_MS := 20.0           # start giving ground below ~50 fps
+const RECOVER_MS := 13.5          # comfortably clear: start taking it back
+const SCALE_MIN := 0.6
+const SCALE_STEP := 0.35          # units of scale per second
+const SHADOW_DROP_MS := 33.0      # ~30 fps: shadows are the next thing to go
 
 @onready var menu_panel: Control = $UI/MenuPanel
 @onready var shop_panel: Control = $UI/ShopPanel
@@ -63,8 +69,9 @@ var _last_health: float = 0.0
 var _touring: bool = false
 var _hurt_flash: float = 0.0
 var _smoothed_ms: float = 16.0
-var _guard_timer: float = 0.0
-var _guard_stage: int = 0
+var _render_scale: float = 1.0
+var _shadows_dropped: bool = false
+var _relief_announced: bool = false
 
 
 func _ready() -> void:
@@ -540,7 +547,7 @@ func _show_results(won: bool) -> void:
 		else "You came #%d of %d" % [placement, MatchManager.total_players])
 	stats_label.text = "%d knocked out · %d coins found on the island" % [kos, found]
 	payout_label.text = "+%d coins  (you now have %d)" % [earned, SaveData.coins]
-	if _guard_stage > 0:
+	if _shadows_dropped or _render_scale <= SCALE_MIN + 0.01:
 		var at := SaveData.BOT_COUNT_CHOICES.find(SaveData.bot_count)
 		var lower: int = SaveData.BOT_COUNT_CHOICES[maxi(0, at - 1)]
 		payout_label.text += "\n(That was hard work for this machine — try %d squishies.)" % lower
@@ -600,40 +607,38 @@ func _process(delta: float) -> void:
 		status_footer.text = ""
 
 
-## Watches the frame rate and sheds load in stages if it stays bad. Each stage is
-## reversible only by restarting, which is fine -- it never fires unless the
-## machine is already struggling, and the alternative is a slideshow.
+## Nudges the render scale toward whatever hits the frame budget, and drops
+## shadows if scale alone is not enough. Both directions, so a machine that
+## copes gets its pixels back.
 func _tend_performance(delta: float) -> void:
 	_smoothed_ms = lerpf(_smoothed_ms, delta * 1000.0, 0.05)
-	if _guard_stage >= GUARD_STAGES:
-		return
 
-	if _smoothed_ms < GUARD_BAD_MS:
-		_guard_timer = maxf(0.0, _guard_timer - delta)
-		return
-	_guard_timer += delta
-	if _guard_timer < GUARD_SAMPLE:
-		return
+	var before := _render_scale
+	if _smoothed_ms > BUDGET_MS:
+		_render_scale = maxf(SCALE_MIN, _render_scale - SCALE_STEP * delta)
+	elif _smoothed_ms < RECOVER_MS:
+		_render_scale = minf(1.0, _render_scale + SCALE_STEP * 0.5 * delta)
+	if not is_equal_approx(before, _render_scale):
+		get_viewport().scaling_3d_scale = _render_scale
 
-	_guard_timer = 0.0
-	_guard_stage += 1
-	match _guard_stage:
-		1:
-			# Shadows first: the most expensive thing on screen that the game
-			# plays exactly the same without.
-			var sun := get_node_or_null("Island/SunLight")
-			if sun != null:
-				sun.shadow_enabled = false
-			MatchManager.detail_scale = 0.6
-			status_footer.text = "Turning the sparkle down a bit..."
-		2:
-			get_viewport().scaling_3d_scale = 0.75
-			MatchManager.detail_scale = 0.4
-			status_footer.text = "Still busy -- turning it down further..."
-		3:
-			get_viewport().scaling_3d_scale = 0.6
-			MatchManager.detail_scale = 0.25
-			status_footer.text = "Try fewer computer squishies from the menu next time."
+	# Shadows are the coarse lever, and only worth pulling once the fine one is
+	# already all the way down.
+	var sun := get_node_or_null("Island/SunLight")
+	if sun == null:
+		return
+	if not _shadows_dropped and _render_scale <= SCALE_MIN + 0.01 \
+			and _smoothed_ms > SHADOW_DROP_MS:
+		_shadows_dropped = true
+		sun.shadow_enabled = false
+		MatchManager.detail_scale = 0.5
+	elif _shadows_dropped and _smoothed_ms < RECOVER_MS and _render_scale > 0.95:
+		_shadows_dropped = false
+		sun.shadow_enabled = true
+		MatchManager.detail_scale = 1.0
+
+	if _render_scale < 0.95 and not _relief_announced:
+		_relief_announced = true
+		status_footer.text = "Turning the sparkle down to keep things smooth..."
 
 
 func _storm_text() -> String:

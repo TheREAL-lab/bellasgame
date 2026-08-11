@@ -13,6 +13,8 @@ enum State { LOBBY, PLAYING, MATCH_OVER }
 
 const MAX_HEALTH := 140.0
 const DROP_HEIGHT := 15.0
+## How long the wall takes to squeeze the final circle down to nothing.
+const FINAL_CLOSE_TIME := 45.0
 
 ## wait = how long the current circle holds, shrink = how long the wall takes to
 ## close, radius = what it closes to, dps = what it costs you to be outside.
@@ -220,13 +222,26 @@ func _apply_storm_damage(delta: float) -> void:
 			node.take_damage(storm_dps * tick, 0)
 
 
+## Once the programmed phases run out the wall keeps creeping shut rather than
+## holding. Without this a match can stall forever: the test found two hurt bots
+## inside the last circle, each running away from the other, with a storm that
+## had stopped closing and could no longer reach either of them. A circle that
+## always ends at nothing guarantees somebody wins.
+func _close_the_last_circle(index: int) -> void:
+	var last_dps: float = PHASES[PHASES.size() - 1].dps
+	if storm_radius <= 0.5:
+		_set_phase.rpc(index, storm_center, 0.0, storm_center, 0.0, 9999.0, last_dps, false)
+	else:
+		_set_phase.rpc(index, storm_center, storm_radius, storm_center, 0.0,
+			FINAL_CLOSE_TIME, last_dps, true)
+
+
 func _advance_phase() -> void:
 	var next := phase_index + 1
 	if closing:
 		# The wall just finished moving; hold here for a breath before the next.
 		if next >= PHASES.size():
-			_set_phase.rpc(next, storm_center, storm_radius, storm_center, storm_radius,
-				9999.0, PHASES[PHASES.size() - 1].dps, false)
+			_close_the_last_circle(next)
 			return
 		# Hold at the circle we just closed to, and keep charging the rate that
 		# circle set -- the next phase's harsher rate starts when it starts.
@@ -236,8 +251,7 @@ func _advance_phase() -> void:
 		return
 
 	if next >= PHASES.size():
-		_set_phase.rpc(next, storm_center, storm_radius, storm_center, storm_radius,
-			9999.0, PHASES[PHASES.size() - 1].dps, false)
+		_close_the_last_circle(next)
 		return
 
 	var phase: Dictionary = PHASES[next]

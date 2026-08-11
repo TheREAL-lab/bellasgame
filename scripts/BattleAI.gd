@@ -16,11 +16,26 @@ const SIGHT_RANGE := 20.0
 ## run away when hurt are the single biggest reason a match lasts minutes rather
 ## than seconds -- without it every fight ran to a knockout.
 const RETREAT_HEALTH := 0.35
+## Below this circle size there is nowhere to run, so stand and fight.
+const RETREAT_ROOM := 25.0
 const SIGHT_ANGLE := deg_to_rad(80.0)
 ## Close enough that a bot will drop what it is doing and fight back. Above this
 ## and a bot still on its foam bonker would rather go and find a real weapon.
 const PROVOKE_RANGE := 11.0
-const THINK_INTERVAL := 0.28
+## How often a bot reasons about its life, by how close it is to somebody who
+## could notice. This is the trick the big battle royales use to afford their
+## crowds: AI ticks at a rate set by relevance, not by a single global number.
+## A bot across the island still walks its path every frame -- it just re-decides
+## where it is going far less often, which nobody can see.
+const THINK_NEAR := 0.28
+const THINK_MID := 0.7
+const THINK_FAR := 1.5
+const NEAR_RANGE := 45.0
+const MID_RANGE := 100.0
+## Past this we stop paying for line-of-sight raycasts and let the vision cone
+## alone decide. It makes distant bots very slightly credulous about cover, which
+## is a fine price for a hundred fewer physics queries a second.
+const LOS_RANGE := 60.0
 const REPATH_MIN := 0.5
 const STORM_MARGIN := 8.0
 const LOOT_INTEREST := 45.0      # how far a bot will walk for a weapon
@@ -37,6 +52,7 @@ var _jump_cooldown: float = 0.0
 var _target: Node3D = null
 var _target_seen_at: float = 0.0
 var _strafe_dir: float = 1.0
+var _relevance: float = 0.0     # metres to the nearest human, refreshed each think
 
 var _boldness: float = 0.5       # how willing this bot is to pick a fight
 var _accuracy: float = 0.5       # how badly it sprays
@@ -54,8 +70,16 @@ func activate(p: CharacterBody3D) -> void:
 	_strafe_dir = 1.0 if randf() < 0.5 else -1.0
 	# Spread the first think across the interval so a hundred bots never all
 	# reason on the same frame.
-	_think_timer = randf() * THINK_INTERVAL
+	_think_timer = randf() * THINK_NEAR
 	set_physics_process(true)
+
+
+func _think_interval() -> float:
+	if _relevance < NEAR_RANGE:
+		return THINK_NEAR
+	if _relevance < MID_RANGE:
+		return THINK_MID
+	return THINK_FAR
 
 
 func _physics_process(delta: float) -> void:
@@ -69,7 +93,8 @@ func _physics_process(delta: float) -> void:
 	_think_timer -= delta
 	_repath_timer -= delta
 	if _think_timer <= 0.0:
-		_think_timer = THINK_INTERVAL * randf_range(0.85, 1.15)
+		_relevance = NetworkManager.distance_to_nearest_human(parent.global_position)
+		_think_timer = _think_interval() * randf_range(0.85, 1.15)
 		_think()
 
 	_act(delta)
@@ -91,8 +116,11 @@ func _think() -> void:
 	if _target != null:
 		var threat: float = here.distance_to(_target.global_position)
 
-		# Hurt squishies leg it. Bold ones hold their ground a little longer.
-		if parent.health < parent.max_health * RETREAT_HEALTH * (1.0 + _boldness * 0.4):
+		# Hurt squishies leg it, but only while there is somewhere to run to. In a
+		# small circle two frightened bots back away from each other until the
+		# clock runs out, which is exactly how a match once failed to finish.
+		if parent.health < parent.max_health * RETREAT_HEALTH * (1.0 + _boldness * 0.4) \
+				and MatchManager.storm_radius > RETREAT_ROOM:
 			mood = Mood.RETREAT
 			var away: Vector3 = (here - _target.global_position).normalized()
 			_go_to(MatchManager.safe_point_near(here + away * 26.0, STORM_MARGIN))
@@ -187,6 +215,11 @@ func _fight(delta: float) -> void:
 
 func _follow_path() -> void:
 	if nav_agent.is_navigation_finished():
+		# Arriving is the one moment a slow-thinking bot must not wait out its
+		# timer: a bot on the far side of the island would otherwise stand on its
+		# destination for a second and a half looking lost. _go_to is still rate
+		# limited, so this cannot turn into a repath storm.
+		_think_timer = 0.0
 		parent.apply_ai_input(Vector2.ZERO, false)
 		return
 	var next_pos := nav_agent.get_next_path_position()
@@ -266,6 +299,11 @@ func _can_see(target: Node3D) -> bool:
 	if facing.length_squared() > 0.001 and flat.length_squared() > 0.001:
 		if facing.normalized().angle_to(flat.normalized()) > SIGHT_ANGLE:
 			return false
+
+	# Far from anybody watching, the cone is enough -- the raycast is the
+	# expensive half and nobody is close enough to catch it being wrong.
+	if _relevance > LOS_RANGE:
+		return true
 
 	var space := parent.get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(from, to)
