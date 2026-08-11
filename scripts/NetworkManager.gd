@@ -1,8 +1,9 @@
 extends Node
 
 ## Hosting/joining plus player spawning. Spawning goes through the
-## MultiplayerSpawner's custom spawn function so that identity (id, name, bot
-## flag) is replicated to every peer, not just set locally on the server.
+## MultiplayerSpawner's custom spawn function so that identity -- id, name, bot
+## flag, cosmetic slot, chosen squishy and perks -- is replicated to every peer,
+## not just set locally on the server.
 
 signal player_list_changed
 signal connection_failed
@@ -10,8 +11,20 @@ signal connected_to_server
 
 const PORT := 8910
 const MAX_HUMAN_PLAYERS := 8
-const AI_BOT_COUNT := 3
+const BOT_COUNT := 100
 const AI_ID_BASE := -1
+
+## Enough names that a hundred bots rarely repeat, and when they do they get a
+## number, because "Jellybean 2" is funnier than two Jellybeans.
+const BOT_NAMES := [
+	"Marshmallow", "Bubblegum", "Jellybean", "Pudding", "Waffles", "Noodle",
+	"Pickle", "Muffin", "Pancake", "Sprinkle", "Doughnut", "Custard",
+	"Biscuit", "Truffle", "Toffee", "Popcorn", "Gumdrop", "Nugget",
+	"Cupcake", "Peaches", "Pumpkin", "Butterbean", "Crumpet", "Sherbet",
+	"Macaroon", "Brownie", "Fudge", "Cookie", "Tapioca", "Wafer",
+	"Blueberry", "Cinnamon", "Nutmeg", "Parsnip", "Radish", "Turnip",
+	"Squash", "Beetroot", "Cabbage", "Sausage",
+]
 
 var player_names: Dictionary = {}    # id -> String (server truth, mirrored to clients)
 var player_slots: Dictionary = {}    # id -> cosmetic slot (server truth; rides along with each spawn)
@@ -42,7 +55,8 @@ func host_game(player_name: String) -> bool:
 	multiplayer.multiplayer_peer = peer
 	is_hosting = true
 	player_names[1] = player_name
-	_spawn_player(1, player_name, false)
+	_spawn_player(1, player_name, false, SaveData.chosen_species, SaveData.chosen_color,
+		SaveData.owned_perks)
 	_spawn_ai_bots()
 	player_list_changed.emit()
 	return true
@@ -82,18 +96,29 @@ func unregister_player(node: Node3D) -> void:
 	player_list_changed.emit()
 
 
+func human_count() -> int:
+	var count := 0
+	for id in player_names.keys():
+		if id > 0:
+			count += 1
+	return count
+
+
 func _on_connected_to_server() -> void:
-	_submit_name.rpc_id(1, local_player_name)
+	# Your wallet lives on your own machine, so the host has to be told what you
+	# picked and what you own; it cannot look it up.
+	_submit_profile.rpc_id(1, local_player_name, SaveData.chosen_species,
+		SaveData.chosen_color, SaveData.owned_perks)
 	connected_to_server.emit()
 
 
 @rpc("any_peer", "call_local", "reliable")
-func _submit_name(pname: String) -> void:
+func _submit_profile(pname: String, species: int, color: int, perks: Array) -> void:
 	if not multiplayer.is_server():
 		return
 	var sender_id := multiplayer.get_remote_sender_id()
 	player_names[sender_id] = pname
-	_spawn_player(sender_id, pname, false)
+	_spawn_player(sender_id, pname, false, species, color, perks)
 	_sync_roster.rpc(player_names)
 
 
@@ -104,7 +129,7 @@ func _sync_roster(roster: Dictionary) -> void:
 
 
 func _on_peer_connected(_id: int) -> void:
-	pass    # Spawning waits until the peer submits its name via _submit_name.
+	pass    # Spawning waits until the peer submits its profile.
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -116,7 +141,7 @@ func _on_peer_disconnected(id: int) -> void:
 	players.erase(id)
 	player_names.erase(id)
 	player_slots.erase(id)
-	GameManager.on_player_removed(id)
+	MatchManager.on_player_removed(id)
 	_sync_roster.rpc(player_names)
 
 
@@ -128,7 +153,8 @@ func _on_server_disconnected() -> void:
 	connection_failed.emit()
 
 
-func _spawn_player(id: int, pname: String, is_bot: bool) -> void:
+func _spawn_player(id: int, pname: String, is_bot: bool, species: int = -1,
+		color: int = -1, perks: Array = []) -> void:
 	if not multiplayer.is_server():
 		return
 	if players.has(id):
@@ -137,14 +163,17 @@ func _spawn_player(id: int, pname: String, is_bot: bool) -> void:
 	if spawner == null:
 		push_error("NetworkManager: no MultiplayerSpawner found in scene tree")
 		return
-	spawner.spawn({"id": id, "name": pname, "bot": is_bot, "slot": _claim_slot(id)})
-	GameManager.on_player_added(id, is_bot)
+	spawner.spawn({
+		"id": id, "name": pname, "bot": is_bot, "slot": _claim_slot(id),
+		"species": species, "color": color, "perks": perks,
+	})
+	MatchManager.on_player_added(id, is_bot)
 
 
-## Which squishy you get. The server hands these out instead of letting each
-## player derive one from its own peer id -- joining peers get arbitrary ids, so
-## two of them could otherwise turn up as the same species in the same colour.
-## Slots freed by a leaver are reused, keeping the low (all-distinct) slots dense.
+## Which squishy you get when you haven't chosen one. The server hands these out
+## instead of letting each player derive one from its own peer id -- joining
+## peers get arbitrary ids, so two of them could otherwise turn up as the same
+## species in the same colour. Slots freed by a leaver are reused.
 func _claim_slot(id: int) -> int:
 	if player_slots.has(id):
 		return player_slots[id]
@@ -157,9 +186,11 @@ func _claim_slot(id: int) -> int:
 
 
 func _spawn_ai_bots() -> void:
-	var bot_names := ["Marshmallow", "Bubblegum", "Jellybean"]
-	for i in range(AI_BOT_COUNT):
+	for i in range(BOT_COUNT):
 		var bot_id := AI_ID_BASE - i
-		var bot_name: String = bot_names[i % bot_names.size()]
+		var bot_name: String = BOT_NAMES[i % BOT_NAMES.size()]
+		var wrap := i / BOT_NAMES.size()
+		if wrap > 0:
+			bot_name = "%s %d" % [bot_name, wrap + 1]
 		player_names[bot_id] = bot_name
 		_spawn_player(bot_id, bot_name, true)

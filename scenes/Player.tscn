@@ -1,7 +1,7 @@
 [gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/Player.gd" id="1"]
-[ext_resource type="Script" path="res://scripts/AIController.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/BattleAI.gd" id="2"]
 [ext_resource type="Script" path="res://scripts/Squishy.gd" id="3"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
@@ -97,7 +97,7 @@ path_height_offset = 0.5
 path_max_distance = 10.0
 avoidance_enabled = false
 
-[node name="AIController" type="Node" parent="."]
+[node name="BattleAI" type="Node" parent="."]
 script = ExtResource("2")
 
 [node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="."]

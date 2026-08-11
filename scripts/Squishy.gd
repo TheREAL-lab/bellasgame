@@ -1,3 +1,4 @@
+class_name Squishy
 extends Node3D
 
 ## Builds and animates a squishy character out of primitives. Every player gets
@@ -11,6 +12,13 @@ const SPECIES_NAMES := ["Bunny", "Kitty", "Bear", "Froggy", "Chick", "Puppy"]
 const EYE_WHITE := Color(1, 1, 1)
 const PUPIL := Color(0.13, 0.1, 0.16)
 const BLUSH := Color(1.0, 0.55, 0.65)
+const HIT_FLASH := Color(1.0, 0.95, 0.95)
+
+## Past this the ears, eyes, feet, snout and weapon stop drawing and the squishy
+## is just its body sphere. With a hundred of them on an island that is the
+## difference between a game and a slideshow, and at forty metres a bunny and a
+## bear are the same three pixels anyway.
+const DETAIL_RANGE := 38.0
 
 var species: int = Species.BUNNY
 
@@ -20,7 +28,13 @@ var eye_right: Node3D
 var ears: Array[Node3D] = []
 var feet: Array[MeshInstance3D] = []
 var tail: Node3D = null
+var hold_point: Node3D = null
+var hat: Node3D = null
 
+var _propeller: Node3D = null
+var _weapon_model: Node3D = null
+var _hold_rest: Vector3 = Vector3.ZERO
+var _flash_tween: Tween = null
 var _body_mat: StandardMaterial3D
 var _accent_mat: StandardMaterial3D
 var _base_color: Color = Color.WHITE
@@ -47,6 +61,9 @@ func build(species_index: int, color: Color) -> void:
 	_build_face()
 	_build_feet()
 	_build_extras()
+	_build_hold_point()
+	_build_hat()
+	_apply_detail_range(body)
 
 
 func species_name() -> String:
@@ -357,12 +374,116 @@ func set_base_color(color: Color) -> void:
 		_accent_mat.albedo_color = color.lightened(0.45)
 
 
-func set_hunter_glow(active: bool) -> void:
-	if _body_mat == null:
+## Where a weapon hangs: out in front and a little to the right, at about the
+## height a squishy with no arms would hold one if it had any.
+func _build_hold_point() -> void:
+	hold_point = Node3D.new()
+	_hold_rest = Vector3(0.34 * _body_width, -0.02, -0.34)
+	hold_point.position = _hold_rest
+	body.add_child(hold_point)
+
+
+## The spinny hat is built once and hidden, rather than made and freed each time
+## somebody picks one up -- a hundred bots swapping hats would churn constantly.
+func _build_hat() -> void:
+	hat = Node3D.new()
+	hat.position = Vector3(0, 0.44, 0)
+	hat.visible = false
+	body.add_child(hat)
+
+	var cap_mat := StandardMaterial3D.new()
+	cap_mat.albedo_color = Color(1.0, 0.42, 0.5)
+	cap_mat.roughness = 0.4
+
+	var cap := MeshInstance3D.new()
+	var cap_mesh := SphereMesh.new()
+	cap_mesh.radius = 0.22
+	cap_mesh.height = 0.24
+	cap_mesh.is_hemisphere = true
+	cap_mesh.radial_segments = 12
+	cap.mesh = cap_mesh
+	cap.material_override = cap_mat
+	hat.add_child(cap)
+
+	var blade_mat := StandardMaterial3D.new()
+	blade_mat.albedo_color = Color(0.45, 0.8, 1.0)
+	blade_mat.roughness = 0.3
+
+	_propeller = Node3D.new()
+	_propeller.position.y = 0.26
+	hat.add_child(_propeller)
+	for i in 2:
+		var blade := MeshInstance3D.new()
+		var blade_mesh := BoxMesh.new()
+		blade_mesh.size = Vector3(0.4, 0.02, 0.085)
+		blade.mesh = blade_mesh
+		blade.material_override = blade_mat
+		blade.rotation.y = PI * float(i) / 2.0
+		_propeller.add_child(blade)
+
+
+## Everything hanging off the body gets a visibility range so the engine drops it
+## at distance without this script doing anything per frame. The body sphere
+## itself keeps no range -- it *is* the far-away version.
+func _apply_detail_range(node: Node) -> void:
+	for child in node.get_children():
+		if child is GeometryInstance3D:
+			child.visibility_range_end = DETAIL_RANGE
+		_apply_detail_range(child)
+
+
+func set_hat(on: bool) -> void:
+	if hat != null:
+		hat.visible = on
+
+
+func spin_propeller(delta: float, speed: float) -> void:
+	if _propeller != null and hat.visible:
+		_propeller.rotation.y += delta * speed
+
+
+## Swap the held model. Passing null empties the hands, which is what being
+## knocked out does.
+func hold(model: Node3D) -> void:
+	if hold_point == null:
 		return
-	_body_mat.emission_enabled = active
-	_body_mat.emission = Color(1.0, 0.35, 0.25)
-	_body_mat.emission_energy_multiplier = 0.9 if active else 0.0
+	if _weapon_model != null and is_instance_valid(_weapon_model):
+		_weapon_model.queue_free()
+	_weapon_model = model
+	if model != null:
+		hold_point.add_child(model)
+		_apply_detail_range(hold_point)
+
+
+## A swing is a quick shove forward and back -- no skeleton, no keyframes, just
+## the hold point doing the acting.
+func swing() -> void:
+	if hold_point == null:
+		return
+	var tween := hold_point.create_tween()
+	tween.tween_property(hold_point, "position", _hold_rest + Vector3(-0.1, 0.12, -0.3), 0.08)
+	tween.tween_property(hold_point, "position", _hold_rest, 0.16)
+	tween.parallel().tween_property(hold_point, "rotation:x", 0.0, 0.16)
+
+
+func recoil() -> void:
+	if hold_point == null:
+		return
+	var tween := hold_point.create_tween()
+	tween.tween_property(hold_point, "position", _hold_rest + Vector3(0, 0.03, 0.11), 0.04)
+	tween.tween_property(hold_point, "position", _hold_rest, 0.1)
+
+
+## A white blink on the whole squishy. Readable across a field at a glance, which
+## a health bar over a distant bot is not.
+func flash_hit() -> void:
+	if _body_mat == null or _is_ghost:
+		return
+	if _flash_tween != null and _flash_tween.is_valid():
+		_flash_tween.kill()
+	_body_mat.albedo_color = HIT_FLASH
+	_flash_tween = create_tween()
+	_flash_tween.tween_property(_body_mat, "albedo_color", _base_color, 0.22)
 
 
 func set_ghost(is_ghost: bool) -> void:
@@ -403,6 +524,10 @@ func animate(delta: float, speed_ratio: float, grounded: bool) -> void:
 
 	if _is_ghost:
 		body.position.y += 0.25 + sin(_walk_phase * 0.5) * 0.08
+
+	# A hat idles slowly on the ground; Player spins it up properly mid-hover.
+	if hat != null and hat.visible and _propeller != null:
+		_propeller.rotation.y += delta * 4.0
 
 	_animate_ears(delta, speed_ratio)
 	_animate_feet(delta, speed_ratio, grounded)

@@ -4,17 +4,21 @@ Guidance for AI assistants working in this repository.
 
 ## What this is
 
-**Bella's Game** — a 3D multiplayer hide-and-seek game built in **Godot 4.7**
-(Forward+ renderer), written entirely in GDScript. It is a small family project
-(a parent and step-daughter), so readability and playfulness matter more than
-engineering ceremony.
+**Squishy Island** — a 3D battle royale built in **Godot 4.7** (Forward+
+renderer), written entirely in GDScript. One human (or two, over LAN) drops onto
+an island with 100 AI bots, and the last squishy bouncing wins. It is a small
+family project (a parent and step-daughter), so readability and playfulness
+matter more than engineering ceremony.
+
+It grew out of a hide-and-seek prototype. The characters, the procedural
+world-building, the networking and the squash-and-stretch animation are
+inherited from it; the hide-and-seek round flow is gone entirely.
 
 Key property of the codebase: **there are no art assets.** Every character,
-prop, and decoration is generated from Godot primitives (`SphereMesh`,
-`CylinderMesh`, `BoxMesh`) in code at runtime. There is no import pipeline, no
-`.glb`/`.png` art, and the whole repo is ~2,900 lines across 7 scripts and 3
-scenes. Preserve this: **do not add downloaded or binary art assets** — build
-new visuals procedurally like everything else.
+prop, weapon and decoration is generated from Godot primitives (`SphereMesh`,
+`CylinderMesh`, `BoxMesh`) in code at runtime. There is no import pipeline and
+no `.glb`/`.png` art. Preserve this: **do not add downloaded or binary art
+assets** — build new visuals procedurally like everything else.
 
 ## Layout
 
@@ -23,19 +27,23 @@ project.godot          Engine config: autoloads, input map, display, rendering
 export_presets.cfg     macOS export preset (tracked on purpose; no secrets in it)
 icon.svg               The only real asset
 scenes/
-  Main.tscn            Root scene (main_scene): instances Arena + all UI CanvasLayer
-  Arena.tscn           World: environment/sky, lights, NavigationRegion3D,
+  Main.tscn            Root scene (main_scene): instances Island + all UI CanvasLayer
+  Island.tscn          World: environment/sky, lights, NavigationRegion3D,
                        Players container, MultiplayerSpawner
   Player.tscn          CharacterBody3D + Visual(Squishy) + camera rig +
-                       NavigationAgent3D + AIController + MultiplayerSynchronizer
+                       NavigationAgent3D + BattleAI + MultiplayerSynchronizer
 scripts/
+  SaveData.gd          AUTOLOAD. Coins, unlocks, perks; the only thing touching disk
   NetworkManager.gd    AUTOLOAD. Host/join, roster, player spawning
-  GameManager.gd       AUTOLOAD. Round state machine, roles, tagging, scores
-  Player.gd            Movement, camera, role/tag reactions (humans AND bots)
-  AIController.gd      Server-only bot brain (hide / flee / patrol / chase)
-  Squishy.gd           Procedural character construction + squash-stretch animation
-  Arena.gd             Procedural playfield, spawn points, navmesh bake
-  Main.gd              Menu, lobby, HUD, scoreboard, headless smoke test
+  MatchManager.gd      AUTOLOAD. Match state, alive tracking, placement, the storm
+  Player.gd            class_name Player. Movement, camera, combat, hover, pickups
+  BattleAI.gd          Server-only bot brain (loot / hunt / fight / retreat / flee)
+  Squishy.gd           class_name Squishy. Character construction + animation
+  Weapons.gd           class_name Weapons. Weapon table + procedural weapon models
+  Loot.gd              Ground loot: weapons, spinny hats, coins
+  Storm.gd             Draws the shrinking wall and the safe patch
+  Island.gd            Procedural island, spawn points, loot spots, navmesh bake
+  Main.gd              Menu, shop, lobby, battle HUD, results, headless smoke test
 ```
 
 `*.gd.uid` files are Godot 4.4+ script UID sidecars — engine-generated, keep them
@@ -44,255 +52,302 @@ in sync (never hand-edit, never delete without deleting the script).
 ## Commands
 
 There is no build system, package manager, test framework, or linter. Everything
-goes through the Godot binary. Substitute your own path — on the author's machine
-it is `/Users/natashavanegas/Downloads/Godot.app/Contents/MacOS/Godot`.
+goes through the Godot binary.
+
+**Godot is not preinstalled in the Claude Code remote container, but it can be.**
+`godotengine.org` is blocked by the agent proxy; GitHub release assets are not:
 
 ```bash
-# Open in the editor
+curl -sSL -o /tmp/godot.zip \
+  https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+unzip -o -q /tmp/godot.zip -d /tmp && install -m755 /tmp/Godot_v4.7-stable_linux.x86_64 /usr/local/bin/godot
+```
+
+Do this rather than reasoning blind — the smoke test catches real bugs, and
+balance changes cannot be judged without running a match.
+
+```bash
+# Open in the editor / run the game
 godot --path .
 
-# Run the game
-godot --path .
-
-# Headless smoke test: hosts a game against the bots and plays a round unattended
+# Headless smoke test: plays a full match against 100 bots unattended (~6 min)
 godot --headless --path . -- autotest
-
-# Same, with screenshots of the hiding and seeking phases
-SHOT_DIR=/some/folder godot --path . -- autotest
 
 # Export the macOS app (writes to build/, which is gitignored)
 godot --headless --path . --export-release "macOS" "build/Bella's Game.app"
 ```
 
-**Note:** Godot is *not* installed in the Claude Code remote container. Changes
-made here cannot be run or verified by executing the game — reason carefully
-about correctness, and say plainly in your summary that the change is unverified
-rather than implying it was tested.
-
 ### The smoke test is the only test
 
-`Main._run_smoke_test()` (`scripts/Main.gd:57`) is the whole verification story.
-It runs when `--` `autotest` is passed as a user arg, and prints:
+`Main._run_smoke_test()` runs when `--` `autotest` is passed as a user arg. It
+hosts a match against the full hundred bots and plays it to a winner. What each
+line is guarding:
 
-- `[test] players spawned:` — should be 4 (host + 3 bots)
-- `[test] state= hunter= hiders=` — role assignment worked
-- `[test] bots moving: N/3` — **the important one.** If this reads 0, bot
-  navigation is broken. This line exists because of a real regression: the
-  `NavigationAgent3D`'s `path_height_offset` put waypoints further above the
-  characters' feet than `path_desired_distance`, so agents never registered
-  arriving at a waypoint and stood frozen forever. Those two properties live in
-  `scenes/Player.tscn` (`path_desired_distance = 1.2`, `path_height_offset = 0.5`)
-  and must stay in that relationship.
-- `positions ok=` — nobody fell through the floor or escaped the arena
-- `remaining= tagged= state=` — tagging is actually resolving
+- `shop buttons:` / `panels ok` — every `@onready` path in `Main.gd` resolved and
+  the shop built. This is the canary for renaming a UI node in `Main.tscn`.
+- `players spawned:` — should be 101 (you + 100 bots).
+- `bots moving: N/100` — **the important one.** If this reads 0, bot navigation
+  is broken. It exists because of a real regression: the `NavigationAgent3D`'s
+  `path_height_offset` put waypoints further above the characters' feet than
+  `path_desired_distance`, so agents never registered arriving at a waypoint and
+  stood frozen forever. Those two properties live in `scenes/Player.tscn`
+  (`path_desired_distance = 1.2`, `path_height_offset = 0.5`) and must stay in
+  that relationship. Expect 55–80 rather than 100: bots standing still in a
+  fight are legitimately not moving.
+- `armed bots:` / `hatted:` — the loot loop. These should climb steeply over the
+  match (roughly 30 → 70 armed). If they stay flat, the pickup sweep in
+  `Loot._sweep()` or the loot table has broken.
+- `frame avg / worst` — logic cost with a hundred bots thinking. Around 7 ms
+  headless. **This measures CPU only; the container has no display, so render
+  cost is never exercised by any of this.**
+- `positions ok=` — nobody fell through the island or walked into the sea.
+- `finished after Ns. winner=` — a match that never resolves is a real failure
+  mode, so the test waits for a winner rather than assuming one turns up. A
+  healthy match ends around 180–220 s.
 
-If you touch navigation, authority, spawning, or the round flow, run this and
-report the numbers.
+If you touch navigation, authority, spawning, combat or the match flow, run this
+and report the numbers.
 
 ## Architecture
 
 ### Autoloads and singletons
 
-`NetworkManager` and `GameManager` are autoloads (see `[autoload]` in
-`project.godot`), so scripts reference them by bare name with no `get_node`.
-They are plain `Node`s, not classes — don't add `class_name` to them.
+`SaveData`, `NetworkManager` and `MatchManager` are autoloads (see `[autoload]`
+in `project.godot`), so scripts reference them by bare name with no `get_node`.
+They are plain `Node`s — **don't add `class_name` to them.** `Player`, `Squishy`
+and `Weapons` are the opposite: they are `class_name` scripts so the UI and the
+AI can reach their constants (`Player.PALETTE`, `Squishy.SPECIES_NAMES`,
+`Weapons.Kind`).
 
 ### Authority model — server-authoritative, clients render
 
 This is the single most important convention. Get it wrong and things desync or
 silently do nothing.
 
-- **The server (peer 1) owns:** round timing, role selection, tag detection,
-  scores, the roster, and *all* bot movement.
+- **The server (peer 1) owns:** match timing, the storm, all damage and
+  elimination decisions, placement, the roster, loot, and *all* bot movement.
 - **Each human player's own peer owns:** its own `Player` body's movement.
-  `Player.gd:168` gates `_move()` behind `is_multiplayer_authority()`.
-- **Bots are authority-1** — set in `Arena._spawn_player_node()`:
-  `player.set_multiplayer_authority(1 if data.bot else int(data.id))`.
-- **Visuals run on every peer.** `visual.animate(...)` in `_physics_process` is
-  deliberately outside the authority check so remote players animate too.
+  `Player._physics_process` gates `_move()` behind `is_multiplayer_authority()`.
+- **Bots are authority-1** — set in `Island._spawn_player_node()`.
+- **Visuals run on every peer.** `visual.animate(...)` is deliberately outside
+  the authority check so remote players animate too.
 - Server-only functions early-return with `if not multiplayer.is_server(): return`.
-  Follow that pattern rather than inventing a new guard.
 
-Replication of position/rotation is done by the `MultiplayerSynchronizer` in
-`Player.tscn` (`.:position` and `Visual:rotation`). Anything else that must be
-seen by all peers goes through an explicit `@rpc`.
+**Damage never originates on the shooter's machine.** A client presses fire,
+`Player.try_attack()` sends `_request_attack.rpc_id(1, dir)`, and the server
+checks the sender actually owns that body before resolving the shot. Everything
+that can hurt somebody funnels through `Player.take_damage()`, which is
+server-only, so there is exactly one place that decides whether a squishy is
+still standing.
+
+Position/rotation replicate through the `MultiplayerSynchronizer` in
+`Player.tscn`. Anything else that must be seen by all peers goes through an
+explicit `@rpc`.
 
 ### Spawning goes through the MultiplayerSpawner's custom spawn function
 
-`NetworkManager._spawn_player()` calls
-`spawner.spawn({"id":…, "name":…, "bot":…, "slot":…})`, and
-`Arena._spawn_player_node()` runs that dictionary through on **every** peer.
-This is why identity (id, name, bot flag, cosmetic slot, authority) is correct
-everywhere instead of only on the server. Never instantiate `Player.tscn`
-directly for a networked player. Anything else that must look the same on every
-peer from the moment a player appears belongs in this dictionary.
+`NetworkManager._spawn_player()` calls `spawner.spawn({...})` and
+`Island._spawn_player_node()` runs that dictionary through on **every** peer, so
+identity is correct everywhere instead of only on the server. The dictionary
+carries `id`, `name`, `bot`, `slot`, `species`, `color` and `perks`.
 
-The spawner and the arena find each other by group, not by path:
-`arena_root`, `player_spawner`, `players_container` (added in `Arena._ready()`).
+Never instantiate `Player.tscn` directly for a networked player. Anything that
+must look the same on every peer from the moment a player appears belongs in
+this dictionary.
+
+**Perks and cosmetics ride in the spawn data on purpose.** `SaveData` is *this
+machine's* wallet, so a `Player` node asking `SaveData` about itself would hand
+every squishy on screen the local player's upgrades. The joining peer sends its
+choices up in `NetworkManager._submit_profile()`.
+
+The spawner and the island find each other by group, not by path: `arena_root`,
+`player_spawner`, `players_container`, `loot`.
 `get_tree().get_first_node_in_group("arena_root")` is the idiom used throughout.
 
-### Player IDs
+### Player IDs and cosmetic slots
 
-- Host is always `1`.
-- Joining peers get Godot's own (effectively random, positive) peer IDs.
-- **Bots use negative IDs**: `AI_ID_BASE = -1`, so `-1, -2, -3`. Code
-  distinguishes bots with `id < 0` in places (e.g. the lobby's "(computer)"
-  suffix in `Main._refresh_player_list()`), so keep bot IDs negative.
+- Host is always `1`; joining peers get Godot's own (arbitrary, positive) IDs.
+- **Bots use negative IDs**: `AI_ID_BASE = -1`, so `-1 … -100`. Code
+  distinguishes bots with `id < 0`, so keep bot IDs negative.
+- Appearance is **not** derived from the peer ID. `NetworkManager._claim_slot()`
+  hands out the lowest free slot as each player spawns, and it rides in the spawn
+  dictionary. A leaver's slot is freed and reused so low slots stay dense.
+- Slot drives species (`slot % 6`) and colour, staggered by `(slot + slot / 6) % 6`
+  so species repeats every six slots but the colour shifts a step each wrap: 36
+  distinct combinations. A human who bought a look in the shop overrides both via
+  `species_override` / `color_override`.
 
-### Cosmetic slots
+### Match flow (`MatchManager`)
 
-Appearance is **not** derived from the peer ID. `NetworkManager._claim_slot()`
-hands out the lowest free slot (`player_slots`, id → slot) as each player is
-spawned, and the slot rides along in the spawn dictionary so every peer agrees.
-Host takes 0, the three bots 1–3, joiners 4 upward; a leaver's slot is freed and
-reused so the low slots stay dense.
+`State.LOBBY → PLAYING → MATCH_OVER`. Placement is simply how many were still
+standing when you went down, which is what a battle royale means by "you came
+7th". The match ends when one player is left.
 
-Slot drives species (`_species_index()` — `slot % 6`) and colour
-(`Player._my_color()`). The colour index is staggered by
-`(slot + slot / 6) % 6`, so species repeats every six slots but the colour
-shifts a step each wrap: 36 distinct combinations, comfortably more than a full
-lobby, and no two players are ever the same squishy in the same colour.
-`_slot()` keeps a peer-ID fallback for the case where a `Player` runs outside
-the spawner (opening `Player.tscn` in the editor) — networked play always has a
-real slot.
+**The storm carries no per-frame replication.** Every peer is handed the phase's
+start circle, end circle and duration once via `_set_phase.rpc(...)`, then
+interpolates the radius itself from the phase clock — so a hundred bots running
+from a wall costs nothing on the wire. Each phase holds (`wait`), then closes
+(`shrink`) to a new circle placed at random but always *inside* the current one,
+so running for the middle is never wrong, only slow. Damage outside is applied
+server-side on a 0.5 s tick rather than every frame.
 
-This is also what `Player._take_lobby_position()` indexes into
-`arena.hider_spawns`, so joining peers spread out deterministically instead of
-by arbitrary ID.
+Tuning lives in `MatchManager.PHASES` and `MAX_HEALTH`.
 
-### Round flow (`GameManager`)
+### Combat and loot
 
-`State.LOBBY → HIDING → SEEKING → ROUND_OVER`, driven by `start_round()` on the
-server and pushed to everyone with `_broadcast_state.rpc(...)`.
+- `Weapons.TABLE` is the single place weapons are defined — add a row and it
+  appears in loot rolls, on the island and in bot hands. `WEIGHTS` controls tier
+  rarity; tier 0 never drops because you already have one.
+- Melee is a forgiving **cone** (about 50°), not a ray. Ranged is hitscan with a
+  fading tracer; shotguns are several rays with spread.
+- Tracers and swing visuals skip entirely beyond 55 m of the local player
+  (`Player._too_far_to_bother`) — a hundred bots trading shots across an island
+  is a lot of tracers nobody can see.
+- **Loot is deliberately not physics.** 130-odd `Area3D`s testing themselves
+  against 101 bodies every frame is a lot of collision pairs for something a
+  distance check answers, so pickups are plain data with a mesh hanging off them
+  and the server sweeps them 5×/second (`Loot._sweep`). Initial loot is seeded
+  off the island so it is identical on every peer with no spawn packets; only
+  *taking* something is replicated. Death drops are replicated with `Loot.drop`,
+  and because RPCs arrive in order every peer appends the same index.
+- Auto-pickup only takes a plain improvement (`Weapons.is_upgrade`), so walking
+  over a worse gun never robs you of the good one. `E` forces a swap.
 
-- `HIDE_TIME = 10.0`, `SEEK_TIME = 90.0`, `TAG_RADIUS = 1.6`
-- The hunter is picked at random from `_known_players`, excluding `_last_hunter`
-  when possible, so nobody is IT twice in a row.
-- Tagging is pure server-side proximity (`_check_tags()` in `_process`), not an
-  input action — the `tag_action` (F) binding exists in the input map but is
-  currently unused.
-- Scoring: hunter catching everyone scores the hunter; timer expiring scores
-  every untagged hider.
-- `spawn_point_for(id)` is deterministic (hunter in the middle, hiders around a
-  ring) so every peer agrees on start positions.
+### Bot AI (`BattleAI.gd`, server-only)
 
-`Player._can_move()` encodes the ritual: nobody moves in LOBBY/ROUND_OVER, the
-hunter is frozen during HIDING, tagged players can't move at all.
+The shape of this file is dictated by there being a hundred of them. Anything
+expensive — target search, line-of-sight rays, asking the navigation server for
+a path — happens on a staggered `_think()` tick (~0.28 s, offset per bot at
+`activate()`); per frame a bot does little more than steer along the path it has.
+Repaths are additionally rate-limited in `_go_to`.
 
-### Bot AI (`AIController.gd`, server-only)
+Priority: **storm > retreat if hurt > fight if provoked > loot > hunt**. Two
+rules in there are load-bearing for pacing, and both were added because the
+match kept ending in under a minute:
 
-Not scripted paths — bots use `NavigationAgent3D` against the baked navmesh:
+- a bot still on its foam bonker goes shopping rather than picking a fight;
+- a bot below ~35 % health runs away instead of trading to the death.
 
-- **As hider:** wander between `arena.hiding_spots`; if the hunter comes within
-  `PANIC_RANGE` (5 m), flee to cover scored by *far from hunter, near to me*.
-- **As hunter:** patrol cover points, and chase only what it can actually see —
-  `_can_see()` checks range (`SIGHT_RANGE` 14 m), a `SIGHT_ANGLE` 75° vision
-  cone, and a raycast with `collision_mask = 1` so **only scenery blocks sight,
-  never other players**. Breaking line of sight genuinely works.
-- Per-bot randomised `_boldness`, `_jumpiness`, `_reaction_delay` so the three
-  don't move as a block.
+Sight is `SIGHT_RANGE` (20 m) plus an 80° cone plus a raycast with
+`collision_mask = 1`, so **only scenery blocks sight, never other squishies** —
+ducking behind a mushroom works, hiding behind a friend does not.
+
+### Making 100 bots affordable
+
+- Bots `queue_free()` their `CameraPivot` at spawn — a hundred `SpringArm3D`s
+  doing shape casts every frame is the most expensive thing a bot can own, and it
+  never looks through its camera. **Guard any camera access behind `is_bot`**;
+  those `@onready` refs are invalid for bots.
+- `Squishy._apply_detail_range()` puts `visibility_range_end` on everything
+  hanging off the body, so past ~38 m a squishy is one sphere and the engine does
+  the culling with no per-frame script. The body mesh itself keeps no range — it
+  *is* the far-away version. Props and weapons do the same.
+- `Player._update_lod()` skips animation entirely for distant bots, on a stagger.
 
 ### Collision layers
 
-- **Layer 1** — world/scenery (ground, walls, prop colliders). This is what
-  blocks both movement and the AI's line-of-sight raycast.
+- **Layer 1** — world/scenery. Blocks movement, shots, and the AI's
+  line-of-sight raycast.
 - **Layer 2** — players. `Player.tscn` is `collision_layer = 2, collision_mask = 1`.
-  Tagged players are removed from layer 2 (`set_collision_layer_value(2, false)`)
-  so ghosts don't body-block the living.
+  Knocked-out players leave layer 2 so ghosts don't body-block the living.
 
-If you add scenery that should *not* block AI vision or navigation, add it as a
-plain `MeshInstance3D` outside `NavigationRegion3D` — that's what the mushroom
-caps, tree canopies, pond, lamps, rainbow and clouds already do.
+Scenery that should *not* block vision or navigation goes in as a plain
+`MeshInstance3D` outside `NavigationRegion3D` — that is what mushroom caps, tree
+canopies, the sea and the clouds already do.
 
-### Procedural world (`Arena.gd`)
+### Procedural island (`Island.gd`)
 
-`_ready()` order matters and is commented in place: ground → walls → props →
-spawns → **navmesh bake** → decoration. Decoration is added *after* the bake and
-*outside* `nav_region`, so it can never affect pathing.
+`_ready()` order matters and is commented in place: ground → boundary → camps →
+props → spawns → **navmesh bake** → decoration → storm → loot. Decoration is
+added after the bake and outside `nav_region`, so it can never affect pathing.
 
-The level is tuned by editing the `PROPS` constant table at the top of
-`Arena.gd` (`type`, `pos`, `size`, `color`) — don't hand-place nodes in the
-scene. Supported types: `mushroom`, `block`, `pillar`, `bush`, `tree`, `rock`,
-`candy`. Each prop automatically contributes a `hiding_spots` entry just behind
-it (away from arena centre), which is what the AI navigates between — so adding
-a prop also adds AI cover.
+Everything is seeded off `ISLAND_SEED`, so the island is the same every match —
+learning where the good loot lives is most of the fun — while still being
+generated rather than hand-placed. Tune with `ISLAND_RADIUS`, `PROP_COUNT`,
+`CAMP_COUNT`, `SPAWN_COUNT`/`SPAWN_GAP`. Build and bake together cost ~450 ms.
 
-Flowers use a single `MultiMesh` (260 instances, one draw call) with a fixed RNG
-seed so the meadow looks the same every run.
+Camps are block clusters that act as loot hotspots and the reason to run
+somewhere specific. Half the scattered props also drop a loot spot behind them.
 
 ### Characters (`Squishy.gd`)
 
-Six species (`BUNNY, CAT, BEAR, FROG, CHICK, PUPPY`), each with its own body
-proportions, ears, face layout, and extras (beak/snout/tail). `build()` is
-idempotent via the `_built` guard.
+Six species (`BUNNY, CAT, BEAR, FROG, CHICK, PUPPY`), each with its own
+proportions, ears, face and extras. `build()` is idempotent via `_built`.
 
-Animation is procedural, driven from `Player._physics_process` via
-`visual.animate(delta, speed_ratio, grounded)`:
+Animation is procedural, driven from `Player._physics_process`: `_squash` is a
+spring (`pop()` kicks it), width derives as `1/sqrt(stretch)` to preserve volume,
+`_walk_phase` drives bounce/ears/feet/tail. `hold()`, `set_hat()`,
+`spin_propeller()`, `swing()`, `recoil()`, `flash_hit()`, `set_ghost()` are the
+hooks `Player.gd` calls.
 
-- `_squash` is a spring (`pop(amount)` kicks it: `+` stretches tall for jumps,
-  `−` squashes flat for landings), and width is derived as `1/sqrt(stretch)` to
-  preserve volume.
-- `_walk_phase` drives bounce, ear swing, foot shuffle, tail wag.
-- Blinking is a random-interval `Tween`; `look_at_point()` makes IT's eyes track
-  its prey.
-- `set_hunter_glow()` / `set_ghost()` / `set_base_color()` are the state hooks
-  `Player.gd` calls on role change and tagging.
+There is no skeleton and no keyframes — a swing is the hold point being tweened
+forward and back.
 
 ### UI (`Main.gd`)
 
-Four mutually-exclusive `Control` panels — Menu, Lobby, HUD, RoundOver — toggled
-by `_show_only()`, which also grabs the mouse when the HUD comes up. All node
-references are `@onready` with full paths into `Main.tscn`, so **renaming a UI
-node in the scene breaks `Main.gd`** — update both together.
+Five mutually-exclusive `Control` panels — Menu, Shop, Lobby, HUD, Result —
+toggled by `_show_only()`. All node references are `@onready` with full paths
+into `Main.tscn`, so **renaming a UI node in the scene breaks `Main.gd`** —
+update both together, and the smoke test's `_check_ui()` will tell you if you
+forgot.
 
-Nameplates hide for hiders during SEEKING (`Player._update_name_visibility()`),
-otherwise floating labels would give away every hiding spot.
+The shop is generated from `SaveData.PERKS`, `Player.PALETTE` and
+`Squishy.SPECIES_NAMES` rather than laid out by hand, so adding a perk or a
+colour makes a button appear on its own.
 
 ## Conventions
 
 - **Tabs for indentation** (Godot standard), two blank lines between top-level
   functions.
-- **Typed declarations** where practical: `var x: float = 0.0`, `func f(d: float) -> void:`.
-  `:=` inference is used freely for locals.
-- **`##` doc comments** at the top of every script and above anything non-obvious.
-  The comment style here explains *why*, often referencing the bug or the play
-  experience that motivated the code ("less floaty, more toy-like"; "otherwise a
-  floating nameplate gives away every hiding spot"). Match that voice — warm and
-  concrete, not formal.
+- **Typed declarations** where practical. Note that `:=` inference *fails* on
+  anything reached through an untyped reference (`parent.aim_origin()`,
+  autoload calls) — write `var x: Vector3 = ...` there or it won't parse.
+- **`##` doc comments** at the top of every script and above anything
+  non-obvious. The comment style here explains *why*, usually naming the bug or
+  the play experience that motivated the code ("less floaty, more toy-like";
+  "without this every match opened with a hundred squishies sprinting into one
+  brawl"). Match that voice — warm and concrete, not formal.
 - **`_leading_underscore`** for private members and internal state.
 - **Tunable numbers are `const`s at the top of the script**, never inline magic
-  numbers: `WALK_SPEED`, `HIDE_TIME`, `SIGHT_RANGE`, `ARENA_HALF`, `PALETTE`.
-  A new tunable belongs up there.
-- Signals over polling for cross-system communication (`state_changed`,
-  `player_tagged`, `player_list_changed`, `scores_changed`, `round_finished`).
+  numbers. A new tunable belongs up there.
+- Signals over polling for cross-system communication.
 - Groups over hard node paths for cross-scene lookups.
 
 ## Gotchas
 
+- **After deleting `.godot/`, run `godot --headless --import` before anything
+  else.** The `class_name` registry lives in
+  `.godot/global_script_class_cache.cfg`, and until it is rebuilt every script
+  referencing `Player`, `Squishy` or `Weapons` fails to parse.
+- **`agent_radius` must be a whole number of `cell_size` units** or Recast
+  rounds it up and quietly fattens every bot. At `cell_size = 0.5` a radius of
+  0.55 became 1.0 and bots refused to walk through any gap under two metres.
+- **`godot --script` with a `SceneTree` script does not give you a real tree** —
+  `parse_source_geometry_data` and anything else needing nodes in the tree will
+  fail with "root node needs to be inside the SceneTree". Test scene-dependent
+  things by running an actual scene.
+- **Don't spawn players in rings.** Forty points on a circle of radius 42 sit six
+  metres apart; the first version of this opened every match with three quarters
+  of the cast knocked out inside thirty seconds. `_compute_spawns()` scatters
+  with a minimum gap for that reason.
 - **Hosting fails silently if the port is taken.** `host_game()` returns `false`
   (port `8910`); `Main._on_host_pressed()` must show that rather than opening an
-  empty lobby. Usually it means a second copy of the game is already running.
+  empty lobby.
 - **Don't call `queue_free()` on a networked player from a client** — removal is
   server-driven via `_on_peer_disconnected`.
-- **`GameManager._process` decrements `time_left` on every peer** but only the
-  server checks tags and ends the round. Adding logic there needs the
-  `is_server()` guard.
-- **`start_round()` `await`s a real timer** between HIDING and SEEKING and
-  re-checks `state` afterwards; don't remove that re-check or a round started
-  during a stale await will stomp the current one.
-- **Two players minimum.** `start_round()` bails below 2 known players — bots
-  count, so solo hosting works.
-- **Godot 4.7 APIs.** This targets a recent Godot; `NavigationServer3D.parse_source_geometry_data`
-  / `bake_from_source_geometry_data` and `MultiplayerSpawner.spawn_function` are
-  4.x-only. Don't "fix" them into 3.x forms.
+- **`MatchManager._process` runs on every peer** to interpolate the storm, but
+  only the server applies damage or advances the phase. Adding logic there needs
+  the `is_server()` guard.
+- **Godot 4.7 APIs.** `NavigationServer3D.parse_source_geometry_data` /
+  `bake_from_source_geometry_data`, `MultiplayerSpawner.spawn_function` and
+  `visibility_range_end` are 4.x-only. Don't "fix" them into 3.x forms.
 - **`.godot/` is gitignored** — the import cache regenerates. Never commit it.
 
 ## Git workflow
 
 - Default branch: `main`. Work on the assigned feature branch, and push with
   `git push -u origin <branch>`.
-- Commit messages in this repo are short, imperative, and describe the player-
-  visible change ("Fix frozen AI, give every player a different squishy, fill out
-  the world").
+- Commit messages in this repo are short, imperative, and describe the
+  player-visible change.
 - Keep `README.md` in step with behaviour changes — it's written for the family,
   in plain language, and doubles as the game's design doc.
