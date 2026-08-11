@@ -405,8 +405,8 @@ func _build_candy_cane(base: Vector3, size: float, color: Color) -> void:
 func _build_sea() -> void:
 	var water := MeshInstance3D.new()
 	water.mesh = _disc(SEA_RADIUS, 0.5, 64)
-	var mat := _make_material(Color(0.32, 0.6, 0.92), 0.08)
-	mat.metallic = 0.4
+	var mat := _make_material(Color(0.18, 0.47, 0.82), 0.25)
+	mat.metallic = 0.15
 	water.material_override = mat
 	water.position.y = -0.35
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

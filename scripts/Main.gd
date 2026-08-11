@@ -7,6 +7,15 @@ extends Node3D
 const HURT_FLASH := Color(1.0, 0.3, 0.3)
 const STORM_FLASH := Color(0.78, 0.42, 1.0)
 
+## Performance guard. If frames stay this expensive for this long, the game
+## starts turning its own sparkle down rather than letting a laptop grind.
+## Nothing here can damage a machine -- the worst a slow frame rate does is make
+## the fans loud -- but a game that has become a slideshow is no fun either, and
+## a five-year-old should not have to know what a graphics setting is.
+const GUARD_BAD_MS := 40.0        # 25 fps
+const GUARD_SAMPLE := 3.0
+const GUARD_STAGES := 3
+
 @onready var menu_panel: Control = $UI/MenuPanel
 @onready var shop_panel: Control = $UI/ShopPanel
 @onready var lobby_panel: Control = $UI/LobbyPanel
@@ -18,6 +27,7 @@ const STORM_FLASH := Color(0.78, 0.42, 1.0)
 @onready var ip_edit: LineEdit = $UI/MenuPanel/Center/VBox/JoinRow/IPEdit
 @onready var join_button: Button = $UI/MenuPanel/Center/VBox/JoinRow/JoinButton
 @onready var shop_button: Button = $UI/MenuPanel/Center/VBox/ShopButton
+@onready var bots_button: Button = $UI/MenuPanel/Center/VBox/BotsButton
 @onready var status_label: Label = $UI/MenuPanel/Center/VBox/StatusLabel
 
 @onready var shop_coins: Label = $UI/ShopPanel/Center/VBox/CoinsLabel
@@ -48,13 +58,20 @@ const STORM_FLASH := Color(0.78, 0.42, 1.0)
 @onready var back_button: Button = $UI/ResultPanel/Center/VBox/BackToMenuButton
 
 var _last_health: float = 0.0
+## Set only by the screenshot tour, which drives the panels itself and must not
+## have the results screen thrown in front of the camera mid-shot.
+var _touring: bool = false
 var _hurt_flash: float = 0.0
+var _smoothed_ms: float = 16.0
+var _guard_timer: float = 0.0
+var _guard_stage: int = 0
 
 
 func _ready() -> void:
 	host_button.pressed.connect(_on_host_pressed)
 	join_button.pressed.connect(_on_join_pressed)
 	shop_button.pressed.connect(_open_shop)
+	bots_button.pressed.connect(_on_bots_pressed)
 	shop_back_button.pressed.connect(func(): _show_only(menu_panel))
 	start_button.pressed.connect(_on_start_pressed)
 	play_again_button.pressed.connect(_on_start_pressed)
@@ -67,10 +84,13 @@ func _ready() -> void:
 	MatchManager.player_eliminated.connect(_on_player_eliminated)
 	MatchManager.match_finished.connect(_on_match_finished)
 
+	_refresh_bots_button()
 	_show_only(menu_panel)
 
 	if OS.get_cmdline_user_args().has("autotest"):
 		_run_smoke_test()
+	elif OS.get_cmdline_user_args().has("shots"):
+		_run_screenshot_tour()
 
 
 # --- smoke test ------------------------------------------------------------
@@ -81,6 +101,8 @@ func _ready() -> void:
 func _run_smoke_test() -> void:
 	await get_tree().process_frame
 	_check_ui()
+	# The test always runs the heaviest case, whatever the menu is set to.
+	SaveData.bot_count = 100
 	var start := Time.get_ticks_msec()
 	if not NetworkManager.host_game("SmokeTester"):
 		print("[test] FAILED to host -- is the port already in use?")
@@ -92,7 +114,7 @@ func _run_smoke_test() -> void:
 	MatchManager.start_match()
 	await get_tree().create_timer(3.0).timeout
 	print("[test] state=", MatchManager.state, " alive=", MatchManager.alive_count())
-	print("[test] bots moving: ", _bots_moving(), "/", NetworkManager.BOT_COUNT)
+	print("[test] bots moving: ", _bots_moving(), "/", SaveData.bot_count)
 	print("[test] armed bots: ", _bots_armed(), " hatted: ", _bots_hatted())
 
 	await _sample_frames(3.0)
@@ -213,6 +235,126 @@ func _all_positions_valid() -> bool:
 	return true
 
 
+# --- screenshots -----------------------------------------------------------
+
+## `SHOT_DIR=/some/folder godot --path . -- shots` plays a match and photographs
+## it from a free camera, so the game can be looked at without anybody having to
+## sit and play it. Needs a real renderer -- on a headless box that means
+## `xvfb-run ... --rendering-method gl_compatibility`.
+func _run_screenshot_tour() -> void:
+	var dir := OS.get_environment("SHOT_DIR")
+	if dir.is_empty():
+		print("[shots] set SHOT_DIR to a folder first")
+		get_tree().quit()
+		return
+
+	_touring = true
+	await get_tree().process_frame
+	name_edit.text = "Bella"
+	await _shoot(dir, "1-menu")
+
+	_build_shop()
+	_show_only(shop_panel)
+	await _shoot(dir, "2-shop")
+
+	_show_only(menu_panel)
+	NetworkManager.host_game("Bella")
+	_show_only(lobby_panel)
+	ip_label.text = "Others join with this address:\n192.168.1.42"
+	_refresh_player_list()
+	await _shoot(dir, "3-lobby")
+
+	MatchManager.start_match()
+	var island = get_tree().get_first_node_in_group("arena_root")
+	var camera := Camera3D.new()
+	camera.fov = 70.0
+	add_child(camera)
+	camera.current = true
+
+	await get_tree().create_timer(6.0).timeout
+	_park(camera, Vector3(0, 150, 205), Vector3.ZERO)
+	await _shoot(dir, "4-island")
+
+	_park(camera, Vector3(38, 13, 44), Vector3(0, 2, 0))
+	await _shoot(dir, "5-drop")
+
+	# Down among them, where the props and the squishies read properly.
+	var crowd := _busiest_spot()
+	_park(camera, crowd + Vector3(7, 4.5, 7), crowd + Vector3.UP)
+	await _shoot(dir, "6-groundlevel")
+
+	await get_tree().create_timer(24.0).timeout
+	var camp: Vector3 = island.landmarks[0] if not island.landmarks.is_empty() else Vector3.ZERO
+	_park(camera, camp + Vector3(11, 6, 11), camp + Vector3.UP)
+	await _shoot(dir, "7-camp")
+
+	# Back to the player's own eyes so the HUD is shown doing its job.
+	var me = NetworkManager.local_player
+	if me != null and is_instance_valid(me):
+		camera.current = false
+		var player_cam := me.get_node_or_null("CameraPivot/SpringArm3D/Camera3D")
+		if player_cam != null:
+			player_cam.current = true
+	_show_only(hud)
+	await _shoot(dir, "8-hud")
+
+	# Late enough that the wall is closing and the safe patch is on the ground.
+	camera.current = true
+	_show_only(hud)
+	while MatchManager.storm_radius > 90.0 and MatchManager.state == MatchManager.State.PLAYING:
+		await get_tree().create_timer(2.0).timeout
+	var centre := MatchManager.storm_center
+	_park(camera, centre + Vector3(0, 95, 150), centre)
+	await _shoot(dir, "9-storm")
+
+	_park(camera, centre + Vector3(30, 9, 30), centre + Vector3.UP * 2.0)
+	await _shoot(dir, "10-stormwall")
+
+	_show_only(result_panel)
+	result_label.text = "You came #7 of 101"
+	stats_label.text = "3 knocked out · 45 coins found on the island"
+	payout_label.text = "+169 coins  (you now have 169)"
+	await _shoot(dir, "11-results")
+
+	print("[shots] done")
+	get_tree().quit()
+
+
+func _park(camera: Camera3D, at: Vector3, looking_at: Vector3) -> void:
+	camera.global_position = at
+	camera.look_at(looking_at, Vector3.UP)
+
+
+## Where the most squishies are standing, so a ground-level shot has somebody in
+## it rather than an empty meadow.
+func _busiest_spot() -> Vector3:
+	var best := Vector3.ZERO
+	var best_count := -1
+	for id in MatchManager.alive.keys():
+		var node = NetworkManager.players.get(id)
+		if node == null or not is_instance_valid(node):
+			continue
+		var here: Vector3 = node.global_position
+		var count := 0
+		for other_id in MatchManager.alive.keys():
+			var other = NetworkManager.players.get(other_id)
+			if other != null and is_instance_valid(other) \
+					and here.distance_to(other.global_position) < 16.0:
+				count += 1
+		if count > best_count:
+			best_count = count
+			best = here
+	return best
+
+
+func _shoot(dir: String, label: String) -> void:
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	var image := get_viewport().get_texture().get_image()
+	image.save_png("%s/%s.png" % [dir, label])
+	print("[shots] ", label)
+
+
 # --- menu and shop ---------------------------------------------------------
 
 func _chosen_name() -> String:
@@ -258,6 +400,17 @@ func _refresh_player_list() -> void:
 
 func _on_start_pressed() -> void:
 	MatchManager.start_match()
+
+
+func _on_bots_pressed() -> void:
+	SaveData.cycle_bot_count()
+	_refresh_bots_button()
+
+
+func _refresh_bots_button() -> void:
+	bots_button.text = "Computer squishies: %d" % SaveData.bot_count
+	status_label.text = ("A hundred is the real thing. Start lower if the fans get loud."
+		if SaveData.bot_count == 100 else "")
 
 
 func _open_shop() -> void:
@@ -370,6 +523,8 @@ func _on_match_finished(winner: int) -> void:
 ## Coins are banked here, once, whether you won or came ninety-first. Anything
 ## you picked up on the island is added to what your placement earned.
 func _show_results(won: bool) -> void:
+	if _touring:
+		return
 	var me := multiplayer.get_unique_id()
 	var placement := MatchManager.placement_of(me)
 	var kos := MatchManager.knockouts_of(me)
@@ -385,6 +540,10 @@ func _show_results(won: bool) -> void:
 		else "You came #%d of %d" % [placement, MatchManager.total_players])
 	stats_label.text = "%d knocked out · %d coins found on the island" % [kos, found]
 	payout_label.text = "+%d coins  (you now have %d)" % [earned, SaveData.coins]
+	if _guard_stage > 0:
+		var at := SaveData.BOT_COUNT_CHOICES.find(SaveData.bot_count)
+		var lower: int = SaveData.BOT_COUNT_CHOICES[maxi(0, at - 1)]
+		payout_label.text += "\n(That was hard work for this machine — try %d squishies.)" % lower
 	play_again_button.visible = NetworkManager.is_hosting
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_show_only(result_panel)
@@ -423,15 +582,58 @@ func _process(delta: float) -> void:
 	_last_health = me.health
 	_hurt_flash = maxf(0.0, _hurt_flash - delta * 2.2)
 
+	# Set the tint and the alpha in one assignment. Writing `vignette.color =
+	# HURT_FLASH` first and fading afterwards looks equivalent and is not: the
+	# constants carry alpha 1.0, so the fade restarted from fully opaque every
+	# frame and the whole game sat behind a pink sheet.
 	var outside := MatchManager.distance_outside(me.global_position) > 0.0
 	var target_alpha: float = 0.32 if outside else _hurt_flash * 0.4
-	vignette.color = STORM_FLASH if outside and _hurt_flash <= 0.0 else HURT_FLASH
-	vignette.color.a = lerpf(vignette.color.a, target_alpha, delta * 6.0)
+	var tint: Color = STORM_FLASH if outside and _hurt_flash <= 0.0 else HURT_FLASH
+	var faded := lerpf(vignette.color.a, target_alpha, clampf(delta * 6.0, 0.0, 1.0))
+	vignette.color = Color(tint.r, tint.g, tint.b, faded)
+
+	_tend_performance(delta)
 
 	if outside and status_footer.text.is_empty():
 		status_footer.text = "Get back inside the circle!"
 	elif not outside and status_footer.text == "Get back inside the circle!":
 		status_footer.text = ""
+
+
+## Watches the frame rate and sheds load in stages if it stays bad. Each stage is
+## reversible only by restarting, which is fine -- it never fires unless the
+## machine is already struggling, and the alternative is a slideshow.
+func _tend_performance(delta: float) -> void:
+	_smoothed_ms = lerpf(_smoothed_ms, delta * 1000.0, 0.05)
+	if _guard_stage >= GUARD_STAGES:
+		return
+
+	if _smoothed_ms < GUARD_BAD_MS:
+		_guard_timer = maxf(0.0, _guard_timer - delta)
+		return
+	_guard_timer += delta
+	if _guard_timer < GUARD_SAMPLE:
+		return
+
+	_guard_timer = 0.0
+	_guard_stage += 1
+	match _guard_stage:
+		1:
+			# Shadows first: the most expensive thing on screen that the game
+			# plays exactly the same without.
+			var sun := get_node_or_null("Island/SunLight")
+			if sun != null:
+				sun.shadow_enabled = false
+			MatchManager.detail_scale = 0.6
+			status_footer.text = "Turning the sparkle down a bit..."
+		2:
+			get_viewport().scaling_3d_scale = 0.75
+			MatchManager.detail_scale = 0.4
+			status_footer.text = "Still busy -- turning it down further..."
+		3:
+			get_viewport().scaling_3d_scale = 0.6
+			MatchManager.detail_scale = 0.25
+			status_footer.text = "Try fewer computer squishies from the menu next time."
 
 
 func _storm_text() -> String:

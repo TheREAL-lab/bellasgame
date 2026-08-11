@@ -56,6 +56,14 @@ it with a spinny hat) · **Bonk/shoot** with the left mouse button · **Grab** w
 1. Open the project in Godot 4 (built and tested on Godot 4.7) and press Play.
 2. Type a name and click **Play / Host Game**, then **Drop in!**
 
+**About that hundred.** The menu has a **Computer squishies** button that cycles
+25 / 50 / 100, and it starts at 50 on purpose — a hundred squishies is the real
+game but it is a lot to draw at once. If the fans get loud or it starts to feel
+sticky, click it down to 25. The game also watches its own frame rate and quietly
+turns off shadows and drops detail if things get heavy, so it should never grind
+to a halt. It cannot hurt the computer — the worst that happens is a warm laptop
+and a noisy fan, and quitting fixes it instantly.
+
 To play together on the same wifi, one person hosts and reads out the address in
 the lobby; the other types it in and clicks **Join**. You both drop onto the same
 island, and you're both fighting the same hundred bots — and each other.

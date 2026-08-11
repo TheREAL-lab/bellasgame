@@ -59,6 +59,9 @@ placeholder_text = "Host address"
 [node name="JoinButton" type="Button" parent="UI/MenuPanel/Center/VBox/JoinRow"]
 text = "Join"
 
+[node name="BotsButton" type="Button" parent="UI/MenuPanel/Center/VBox"]
+text = "Computer squishies: 50"
+
 [node name="ShopButton" type="Button" parent="UI/MenuPanel/Center/VBox"]
 text = "Shop"
 

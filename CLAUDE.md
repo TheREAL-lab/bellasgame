@@ -73,6 +73,12 @@ godot --path .
 # Headless smoke test: plays a full match against 100 bots unattended (~6 min)
 godot --headless --path . -- autotest
 
+# Photograph the game: plays a match and shoots it from a free camera.
+# Needs a real renderer -- there is no GPU or display in the container, so it
+# goes through Xvfb and the software GL path rather than Forward+.
+SHOT_DIR=/some/folder xvfb-run -a -s "-screen 0 1600x900x24" \
+  godot --path . --rendering-method gl_compatibility --rendering-driver opengl3 -- shots
+
 # Export the macOS app (writes to build/, which is gitignored)
 godot --headless --path . --export-release "macOS" "build/Bella's Game.app"
 ```
@@ -232,6 +238,23 @@ Sight is `SIGHT_RANGE` (20 m) plus an 80° cone plus a raycast with
 `collision_mask = 1`, so **only scenery blocks sight, never other squishies** —
 ducking behind a mushroom works, hiding behind a friend does not.
 
+### Not melting the player's machine
+
+Two layers, because a hundred bots is genuinely a lot to ask of a laptop:
+
+- **`SaveData.bot_count`** (25/50/100, cycled from the menu, **default 50**).
+  A first run should never be the heaviest thing the machine has ever drawn.
+  The smoke test overrides this to 100 so the test always runs the worst case.
+- **`Main._tend_performance()`** watches smoothed frame time during a match and
+  sheds load in stages if it stays past `GUARD_BAD_MS` for `GUARD_SAMPLE`
+  seconds: shadows off → `scaling_3d_scale` 0.75 → 0.6, winding
+  `MatchManager.detail_scale` down alongside. It tells the player what it did and
+  suggests fewer bots on the results screen. Stages don't reverse within a match,
+  which is fine — it only ever fires on a machine that is already struggling.
+
+Nothing a game does can damage a Mac; the honest worst case is heat, fan noise
+and an unresponsive window. The guard exists so it stays *playable*, not safe.
+
 ### Making 100 bots affordable
 
 - Bots `queue_free()` their `CameraPivot` at spawn — a hundred `SpringArm3D`s
@@ -326,6 +349,12 @@ colour makes a button appear on its own.
   `parse_source_geometry_data` and anything else needing nodes in the tree will
   fail with "root node needs to be inside the SceneTree". Test scene-dependent
   things by running an actual scene.
+- **Don't reassign a whole `Color` when you mean to fade its alpha.** The
+  vignette did `vignette.color = HURT_FLASH` and then lerped `.a` down; the
+  constant carries alpha 1.0, so the fade restarted from opaque every frame and
+  the entire game sat behind a pink sheet. It never showed up in the smoke test
+  because headless draws nothing — **UI and post-process bugs need the
+  screenshot mode, not the smoke test.**
 - **Don't spawn players in rings.** Forty points on a circle of radius 42 sit six
   metres apart; the first version of this opened every match with three quarters
   of the cast knocked out inside thirty seconds. `_compute_spawns()` scatters

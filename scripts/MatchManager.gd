@@ -53,6 +53,10 @@ var _phase_duration: float = 1.0
 var _known_players: Array = []
 var _damage_accum: float = 0.0
 
+## Scales how far away a squishy still animates. The performance guard in Main
+## winds this down when frames get expensive; nothing else should touch it.
+var detail_scale: float = 1.0
+
 
 func on_player_added(id: int, _is_bot: bool) -> void:
 	if not multiplayer.is_server():

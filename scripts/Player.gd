@@ -585,7 +585,7 @@ func _update_lod(delta: float) -> void:
 		_far_away = false
 		return
 	var dist := global_position.distance_to(me.global_position)
-	_far_away = dist > LOD_DISTANCE
+	_far_away = dist > LOD_DISTANCE * MatchManager.detail_scale
 	name_label.visible = not is_down and dist < 22.0
 
 

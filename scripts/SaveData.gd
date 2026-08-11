@@ -7,6 +7,13 @@ extends Node
 
 const SAVE_PATH := "user://bellasgame.save"
 
+## How many computer squishies to fight. A hundred is the real game, but it is a
+## lot to ask of a laptop, so the menu lets you pick and we default to the middle
+## one -- a first run should never be the heaviest thing the machine has ever
+## been asked to draw.
+const BOT_COUNT_CHOICES := [25, 50, 100]
+const DEFAULT_BOT_COUNT := 50
+
 const PAYOUT_PER_KO := 10
 const PAYOUT_WIN := 150
 const PAYOUT_TOP_TEN := 40
@@ -44,6 +51,7 @@ var unlocked_colors: Array = []
 var owned_perks: Array = []
 var chosen_species: int = 0
 var chosen_color: int = 0
+var bot_count: int = DEFAULT_BOT_COUNT
 
 
 func _ready() -> void:
@@ -116,6 +124,13 @@ func buy(kind: String, key) -> bool:
 	return true
 
 
+func cycle_bot_count() -> void:
+	var at := BOT_COUNT_CHOICES.find(bot_count)
+	bot_count = BOT_COUNT_CHOICES[(at + 1) % BOT_COUNT_CHOICES.size()]
+	loadout_changed.emit()
+	save_game()
+
+
 func choose_species(index: int) -> void:
 	if not has_species(index):
 		return
@@ -155,6 +170,7 @@ func save_game() -> void:
 		"perks": owned_perks,
 		"chosen_species": chosen_species,
 		"chosen_color": chosen_color,
+		"bot_count": bot_count,
 	}))
 	file.close()
 
@@ -175,6 +191,9 @@ func load_game() -> void:
 	owned_perks = parsed.get("perks", [])
 	chosen_species = int(parsed.get("chosen_species", 0))
 	chosen_color = int(parsed.get("chosen_color", 0))
+	bot_count = int(parsed.get("bot_count", DEFAULT_BOT_COUNT))
+	if not BOT_COUNT_CHOICES.has(bot_count):
+		bot_count = DEFAULT_BOT_COUNT
 	# A save edited by hand (or by an older build) must never leave you wearing
 	# something you cannot select in the shop.
 	if not has_species(chosen_species):

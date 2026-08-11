@@ -11,7 +11,6 @@ signal connected_to_server
 
 const PORT := 8910
 const MAX_HUMAN_PLAYERS := 8
-const BOT_COUNT := 100
 const AI_ID_BASE := -1
 
 ## Enough names that a hundred bots rarely repeat, and when they do they get a
@@ -186,7 +185,7 @@ func _claim_slot(id: int) -> int:
 
 
 func _spawn_ai_bots() -> void:
-	for i in range(BOT_COUNT):
+	for i in range(SaveData.bot_count):
 		var bot_id := AI_ID_BASE - i
 		var bot_name: String = BOT_NAMES[i % BOT_NAMES.size()]
 		var wrap := i / BOT_NAMES.size()
