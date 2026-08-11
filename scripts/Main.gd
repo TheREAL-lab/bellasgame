@@ -108,8 +108,10 @@ func _ready() -> void:
 func _run_smoke_test() -> void:
 	await get_tree().process_frame
 	_check_ui()
-	# The test always runs the heaviest case, whatever the menu is set to.
-	SaveData.bot_count = 100
+	# Defaults to the heaviest case whatever the menu says, but `-- autotest
+	# bots=25` will run any count, which is how the scaling numbers get measured.
+	SaveData.bot_count = _bot_count_arg(100)
+	print("[test] bot count: ", SaveData.bot_count)
 	var start := Time.get_ticks_msec()
 	if not NetworkManager.host_game("SmokeTester"):
 		print("[test] FAILED to host -- is the port already in use?")
@@ -164,6 +166,13 @@ func _run_smoke_test() -> void:
 	get_tree().quit()
 
 
+func _bot_count_arg(fallback: int) -> int:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("bots="):
+			return maxi(1, int(arg.split("=")[1]))
+	return fallback
+
+
 ## Every panel gets shown and the shop gets built, because all of this file's
 ## node references are hard paths into Main.tscn -- renaming one node in the
 ## editor breaks this script, and it is the kind of break that otherwise only
@@ -211,21 +220,33 @@ func _bots_hatted() -> int:
 	return hatted
 
 
-## Frame cost with a hundred bots thinking is the thing most likely to make this
-## unplayable, so the test measures it rather than hoping.
+## What the bots actually cost. Measures the engine's own process/physics timers
+## rather than wall-clock frame time: headless runs against a frame limiter, so
+## delta stayed pinned at 6.9 ms whether there were 25 bots or 100 and told us
+## precisely nothing. These two monitors are the real work per frame.
 func _sample_frames(seconds: float) -> void:
 	var frames := 0
-	var worst := 0.0
 	var elapsed := 0.0
+	var process_total := 0.0
+	var physics_total := 0.0
+	var worst := 0.0
+	var wall_start := Time.get_ticks_usec()
 	while elapsed < seconds:
 		await get_tree().process_frame
-		var dt := get_process_delta_time()
-		elapsed += dt
+		elapsed += get_process_delta_time()
 		frames += 1
-		worst = maxf(worst, dt)
-	print("[test] frame avg %.1f ms, worst %.1f ms (%d frames, %d alive)"
-		% [elapsed / maxf(frames, 1) * 1000.0, worst * 1000.0, frames,
-			MatchManager.alive_count()])
+		var p: float = Performance.get_monitor(Performance.TIME_PROCESS)
+		var f: float = Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+		process_total += p
+		physics_total += f
+		worst = maxf(worst, p + f)
+	var n := maxf(frames, 1)
+	var wall_ms := float(Time.get_ticks_usec() - wall_start) / 1000.0
+	print("[test] cpu: process %.2f ms/frame, physics %.2f ms/step (worst %.2f, %d alive)"
+		% [process_total / n * 1000.0, physics_total / n * 1000.0,
+			worst * 1000.0, MatchManager.alive_count()])
+	print("[test] wall: %d frames in %.0f ms = %.1f fps (%.2f ms/frame real)"
+		% [frames, wall_ms, float(frames) / (wall_ms / 1000.0), wall_ms / n])
 
 
 func _all_positions_valid() -> bool:

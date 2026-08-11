@@ -103,10 +103,17 @@ line is guarding:
 - `armed bots:` / `hatted:` — the loot loop. These should climb steeply over the
   match (roughly 30 → 70 armed). If they stay flat, the pickup sweep in
   `Loot._sweep()` or the loot table has broken.
-- `frame avg / worst` — logic cost with a hundred bots thinking. Around 7 ms
-  headless (the first sample can spike while a hundred squishies are still
-  being built). **This measures CPU only; the container has no display, so render
-  cost is never exercised by any of this.**
+- `cpu:` / `wall:` — what the bots cost. **Read the `cpu:` line, ignore the fps
+  on the `wall:` line.** Headless is pinned at exactly 145 fps (435 frames per
+  3 s) whether there are 25 bots or 100, so wall-clock frame time is measuring
+  the frame limiter and nothing else — an earlier version of this test reported
+  "6.9 ms" at every bot count and looked like a clean bill of health. The `cpu:`
+  line reads Godot's own `TIME_PROCESS` / `TIME_PHYSICS_PROCESS` counters, which
+  do move with load. Rough shape, 25 → 100 bots: process 2.3 → 6.0, physics
+  4.0 → 12.9. **Physics dominates and grows fastest**, so bot movement
+  (`move_and_slide`, navigation agents, LOS rays) is where to look first if this
+  ever needs to get cheaper. Treat these as *relative* numbers: no display means
+  render cost is never exercised, and no absolute frame rate can be inferred.
 - `positions ok=` — nobody fell through the island or walked into the sea.
 - `finished after Ns. winner=` — a match that never resolves is a real failure
   mode, so the test waits for a winner rather than assuming one turns up. A
