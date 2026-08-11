@@ -14,6 +14,7 @@ const AI_BOT_COUNT := 3
 const AI_ID_BASE := -1
 
 var player_names: Dictionary = {}    # id -> String (server truth, mirrored to clients)
+var player_slots: Dictionary = {}    # id -> cosmetic slot (server truth; rides along with each spawn)
 var players: Dictionary = {}         # id -> Player node, maintained on every peer
 var local_player: Node3D = null
 var local_player_name: String = "Player"
@@ -114,6 +115,7 @@ func _on_peer_disconnected(id: int) -> void:
 		node.queue_free()
 	players.erase(id)
 	player_names.erase(id)
+	player_slots.erase(id)
 	GameManager.on_player_removed(id)
 	_sync_roster.rpc(player_names)
 
@@ -135,8 +137,23 @@ func _spawn_player(id: int, pname: String, is_bot: bool) -> void:
 	if spawner == null:
 		push_error("NetworkManager: no MultiplayerSpawner found in scene tree")
 		return
-	spawner.spawn({"id": id, "name": pname, "bot": is_bot})
+	spawner.spawn({"id": id, "name": pname, "bot": is_bot, "slot": _claim_slot(id)})
 	GameManager.on_player_added(id, is_bot)
+
+
+## Which squishy you get. The server hands these out instead of letting each
+## player derive one from its own peer id -- joining peers get arbitrary ids, so
+## two of them could otherwise turn up as the same species in the same colour.
+## Slots freed by a leaver are reused, keeping the low (all-distinct) slots dense.
+func _claim_slot(id: int) -> int:
+	if player_slots.has(id):
+		return player_slots[id]
+	var taken: Array = player_slots.values()
+	var slot := 0
+	while taken.has(slot):
+		slot += 1
+	player_slots[id] = slot
+	return slot
 
 
 func _spawn_ai_bots() -> void:

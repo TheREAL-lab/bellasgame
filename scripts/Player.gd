@@ -28,6 +28,7 @@ var player_id: int = 0
 var player_name: String = "Player"
 var is_bot: bool = false
 var is_tagged: bool = false
+var slot: int = -1               # cosmetic slot, handed out by the server at spawn
 
 var input_dir: Vector2 = Vector2.ZERO
 var wants_jump: bool = false
@@ -78,20 +79,28 @@ func _take_lobby_position() -> void:
 	if arena == null or arena.hider_spawns.is_empty():
 		return
 	var spawns: Array = arena.hider_spawns
-	global_position = spawns[absi(player_id) % spawns.size()]
+	# Slot, not id: two joining peers with arbitrary ids could pick the same
+	# corner and shove each other around before the round even starts.
+	global_position = spawns[_slot() % spawns.size()]
 
 
 func _exit_tree() -> void:
 	NetworkManager.unregister_player(self)
 
 
+## Species repeats every six slots, but the colour shifts a step each time it
+## wraps, so even a full lobby never contains two identical squishies.
 func _my_color() -> Color:
-	return PALETTE[_slot() % PALETTE.size()]
+	var s := _slot()
+	return PALETTE[(s + s / PALETTE.size()) % PALETTE.size()]
 
 
-## Host is slot 0, joining players 1.., bots take the slots after that, so
-## nobody shares a species or colour with anybody else.
+## Slots come from NetworkManager so that appearance doesn't depend on the peer
+## id, which is arbitrary for anyone who joins. The fallback only matters when a
+## Player is run outside the spawner, e.g. opening Player.tscn in the editor.
 func _slot() -> int:
+	if slot >= 0:
+		return slot
 	return player_id - 1 if player_id > 0 else 1 - player_id
 
 

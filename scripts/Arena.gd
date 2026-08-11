@@ -72,6 +72,7 @@ func _spawn_player_node(data: Dictionary) -> Node:
 	player.player_id = data.id
 	player.player_name = data.name
 	player.is_bot = data.bot
+	player.slot = data.slot
 	player.set_multiplayer_authority(1 if data.bot else int(data.id))
 	return player
 

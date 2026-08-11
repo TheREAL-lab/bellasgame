@@ -120,10 +120,12 @@ seen by all peers goes through an explicit `@rpc`.
 ### Spawning goes through the MultiplayerSpawner's custom spawn function
 
 `NetworkManager._spawn_player()` calls
-`spawner.spawn({"id":…, "name":…, "bot":…})`, and `Arena._spawn_player_node()`
-runs that dictionary through on **every** peer. This is why identity (id, name,
-bot flag, authority) is correct everywhere instead of only on the server. Never
-instantiate `Player.tscn` directly for a networked player.
+`spawner.spawn({"id":…, "name":…, "bot":…, "slot":…})`, and
+`Arena._spawn_player_node()` runs that dictionary through on **every** peer.
+This is why identity (id, name, bot flag, cosmetic slot, authority) is correct
+everywhere instead of only on the server. Never instantiate `Player.tscn`
+directly for a networked player. Anything else that must look the same on every
+peer from the moment a player appears belongs in this dictionary.
 
 The spawner and the arena find each other by group, not by path:
 `arena_root`, `player_spawner`, `players_container` (added in `Arena._ready()`).
@@ -137,13 +139,26 @@ The spawner and the arena find each other by group, not by path:
   distinguishes bots with `id < 0` in places (e.g. the lobby's "(computer)"
   suffix in `Main._refresh_player_list()`), so keep bot IDs negative.
 
-`Player._slot()` maps an ID to a cosmetic slot (`id - 1` for humans, `1 - id`
-for bots), and slot drives both species (`_species_index()`) and colour from
-`PALETTE`. This gives host + 3 bots four distinct squishies. Caveat worth
-knowing: because joining peers get arbitrary IDs, two *joined humans* can land
-on the same species/colour. If you ever need guaranteed-unique appearance, slot
-assignment must move to the server-side roster rather than being derived from
-the peer ID.
+### Cosmetic slots
+
+Appearance is **not** derived from the peer ID. `NetworkManager._claim_slot()`
+hands out the lowest free slot (`player_slots`, id → slot) as each player is
+spawned, and the slot rides along in the spawn dictionary so every peer agrees.
+Host takes 0, the three bots 1–3, joiners 4 upward; a leaver's slot is freed and
+reused so the low slots stay dense.
+
+Slot drives species (`_species_index()` — `slot % 6`) and colour
+(`Player._my_color()`). The colour index is staggered by
+`(slot + slot / 6) % 6`, so species repeats every six slots but the colour
+shifts a step each wrap: 36 distinct combinations, comfortably more than a full
+lobby, and no two players are ever the same squishy in the same colour.
+`_slot()` keeps a peer-ID fallback for the case where a `Player` runs outside
+the spawner (opening `Player.tscn` in the editor) — networked play always has a
+real slot.
+
+This is also what `Player._take_lobby_position()` indexes into
+`arena.hider_spawns`, so joining peers spread out deterministically instead of
+by arbitrary ID.
 
 ### Round flow (`GameManager`)
 
