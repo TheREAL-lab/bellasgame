@@ -98,6 +98,8 @@ func _ready() -> void:
 		_run_smoke_test()
 	elif OS.get_cmdline_user_args().has("shots"):
 		_run_screenshot_tour()
+	elif OS.get_cmdline_user_args().has("film"):
+		_run_film()
 
 
 # --- smoke test ------------------------------------------------------------
@@ -345,6 +347,40 @@ func _run_screenshot_tour() -> void:
 	await _shoot(dir, "11-results")
 
 	print("[shots] done")
+	get_tree().quit()
+
+
+## `SHOT_DIR=/some/folder godot --path . -- film` records a run of numbered
+## frames from a camera that follows the action, for stitching into something
+## that moves. Same renderer caveat as the screenshot tour.
+func _run_film() -> void:
+	var dir := OS.get_environment("SHOT_DIR")
+	if dir.is_empty():
+		print("[film] set SHOT_DIR to a folder first")
+		get_tree().quit()
+		return
+
+	_touring = true
+	await get_tree().process_frame
+	NetworkManager.host_game("Bella")
+	MatchManager.start_match()
+	_show_only(hud)
+
+	var camera := Camera3D.new()
+	camera.fov = 70.0
+	add_child(camera)
+	camera.current = true
+
+	# Chase whoever has company: a shot of an empty meadow is not worth the disk.
+	var frame := 0
+	while frame < 150:
+		var focus := _busiest_spot()
+		var angle := float(frame) * 0.035
+		_park(camera, focus + Vector3(cos(angle) * 11.0, 6.5, sin(angle) * 11.0),
+			focus + Vector3.UP * 1.2)
+		await _shoot(dir, "f%03d" % frame)
+		frame += 1
+	print("[film] done")
 	get_tree().quit()
 
 
