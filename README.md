@@ -56,6 +56,19 @@ it with a spinny hat) · **Bonk/shoot** with the left mouse button · **Grab** w
 1. Open the project in Godot 4 (built and tested on Godot 4.7) and press Play.
 2. Type a name and click **Play / Host Game**, then **Drop in!**
 
+**If the very first open says no main scene has been picked**, or the Output
+panel complains that `Player` or `Squishy` isn't declared: that's a fresh clone
+with no import cache yet. Godot keeps its list of script class names inside
+`.godot/`, which isn't checked in, so on the first open the scripts can fail to
+parse and the main scene can't load. Quit Godot and run this once in the project
+folder, then open it again:
+
+```bash
+/Applications/Godot.app/Contents/MacOS/Godot --headless --import
+```
+
+It only ever happens once, on a machine that has never opened the project.
+
 **About that hundred.** The menu has a **Computer squishies** button that cycles
 25 / 50 / 100, and it starts at 50 on purpose — a hundred squishies is the real
 game but it is a lot to draw at once. If the fans get loud or it starts to feel
