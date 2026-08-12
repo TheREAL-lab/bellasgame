@@ -35,7 +35,7 @@ theme_override_constants/separation = 10
 
 [node name="TitleLabel" type="Label" parent="UI/MenuPanel/Center/VBox"]
 theme_override_font_sizes/font_size = 40
-text = "Squishy Island"
+text = "Natasha's Idea"
 horizontal_alignment = 1
 
 [node name="SubtitleLabel" type="Label" parent="UI/MenuPanel/Center/VBox"]

@@ -4,7 +4,7 @@ Guidance for AI assistants working in this repository.
 
 ## What this is
 
-**Squishy Island** — a 3D battle royale built in **Godot 4.7** (Forward+
+**Natasha's Idea** — a 3D battle royale built in **Godot 4.7** (Forward+
 renderer), written entirely in GDScript. One human (or two, over LAN) drops onto
 an island with 100 AI bots, and the last squishy bouncing wins. It is a small
 family project (a parent and step-daughter), so readability and playfulness

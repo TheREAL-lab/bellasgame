@@ -1,4 +1,4 @@
-# Squishy Island
+# Natasha's Idea
 
 A 3D battle royale built in Godot 4, made together with my step-daughter Bella.
 

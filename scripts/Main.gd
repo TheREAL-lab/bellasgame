@@ -428,7 +428,7 @@ func _chosen_name() -> String:
 
 func _on_host_pressed() -> void:
 	if not NetworkManager.host_game(_chosen_name()):
-		status_label.text = "Couldn't start a game. Is Squishy Island already open in another window?"
+		status_label.text = "Couldn't start a game. Is Natasha's Idea already open in another window?"
 		return
 	ip_label.text = "Others join with this address:\n%s" % NetworkManager.get_local_ip()
 	ip_label.visible = true
