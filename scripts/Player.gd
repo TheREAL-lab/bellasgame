@@ -30,6 +30,21 @@ const PICKUP_REACH := 2.6
 const LOD_DISTANCE := 45.0       # past this, bots stop animating
 const LOD_INTERVAL := 0.25
 
+## Past this from every human, a bot stops being a physics body and just slides
+## along the path the navigation agent already worked out.
+##
+## `move_and_slide` on a hundred capsules is the most expensive thing in the
+## game: physics was 12.9 ms of the ~19 ms a hundred bots cost, and it grew
+## faster with bot count than everything else put together. A squishy eighty
+## metres away clipping the corner of a mushroom is not a thing anybody can see,
+## and the path it is following was routed around the props anyway.
+const SIMPLE_MOVE_RANGE := 80.0
+## The island is one flat disc, so "the ground" is a constant. Bots still in the
+## air -- the opening drop -- keep their physics until they land, or they would
+## teleport down mid-fall.
+const GROUND_Y := 0.0
+const SIMPLE_MOVE_CEILING := 1.5
+
 const PALETTE := [
 	Color(1.0, 0.55, 0.78),  # bubblegum
 	Color(0.45, 0.8, 1.0),   # sky
@@ -69,6 +84,7 @@ var _was_grounded: bool = true
 var _attack_cd: float = 0.0
 var _lod_timer: float = 0.0
 var _far_away: bool = false
+var _simple_move: bool = false
 
 @onready var visual: Node3D = $Visual
 @onready var camera_pivot: Node3D = $CameraPivot
@@ -504,7 +520,28 @@ func _can_move() -> bool:
 	return MatchManager.state == MatchManager.State.PLAYING
 
 
+## Movement for a bot nobody is near: walk the direction the AI asked for, sit on
+## the ground, and never touch the physics server. Velocity is still written so
+## the smoke test's "bots moving" count and the animation code keep working.
+func _move_simply(delta: float) -> void:
+	var direction := Vector3(input_dir.x, 0.0, input_dir.y)
+	var horizontal := Vector3.ZERO
+	if direction.length_squared() > 0.001:
+		direction = direction.normalized()
+		horizontal = direction * WALK_SPEED
+		var target_yaw := atan2(direction.x, direction.z)
+		visual.rotation.y = lerp_angle(visual.rotation.y, target_yaw, 12.0 * delta)
+	velocity = horizontal
+	global_position += horizontal * delta
+	global_position.y = GROUND_Y
+	_was_grounded = true
+
+
 func _move(delta: float) -> void:
+	if _simple_move:
+		_move_simply(delta)
+		return
+
 	var grounded := is_on_floor()
 
 	if grounded:
@@ -580,13 +617,21 @@ func _update_lod(delta: float) -> void:
 	if _lod_timer > 0.0:
 		return
 	_lod_timer = LOD_INTERVAL
-	var me = NetworkManager.local_player
-	if me == null or not is_instance_valid(me):
-		_far_away = false
-		return
-	var dist := global_position.distance_to(me.global_position)
-	_far_away = dist > LOD_DISTANCE * MatchManager.detail_scale
-	name_label.visible = not is_down and dist < 22.0
+
+	# Two different questions, deliberately asked of two different distances.
+	# What to *draw* depends on this screen's camera; whether to simulate
+	# properly depends on the nearest human anywhere, because in co-op the other
+	# player might be stood right next to this bot on their own machine.
+	var watcher = NetworkManager.local_player
+	if watcher != null and is_instance_valid(watcher):
+		var dist := global_position.distance_to(watcher.global_position)
+		_far_away = dist > LOD_DISTANCE * MatchManager.detail_scale
+		name_label.visible = not is_down and dist < 22.0
+	else:
+		_far_away = true
+
+	var nearest: float = NetworkManager.distance_to_nearest_human(global_position)
+	_simple_move = nearest > SIMPLE_MOVE_RANGE and global_position.y < SIMPLE_MOVE_CEILING
 
 
 func apply_ai_input(direction: Vector2, jump: bool, hold: bool = false) -> void:

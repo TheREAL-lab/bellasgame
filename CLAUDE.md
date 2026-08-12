@@ -110,10 +110,10 @@ line is guarding:
   "6.9 ms" at every bot count and looked like a clean bill of health. The `cpu:`
   line reads Godot's own `TIME_PROCESS` / `TIME_PHYSICS_PROCESS` counters, which
   do move with load. Rough shape, 25 → 100 bots: process 2.3 → 6.0, physics
-  4.0 → 12.9. **Physics dominates and grows fastest**, so bot movement
-  (`move_and_slide`, navigation agents, LOS rays) is where to look first if this
-  ever needs to get cheaper. Treat these as *relative* numbers: no display means
-  render cost is never exercised, and no absolute frame rate can be inferred.
+  4.0 → 11.4. **Physics dominates and grows fastest.** Expect ±1 ms between
+  runs, so don't read a single run as a result. Treat these as *relative*
+  numbers: no display means render cost is never exercised, and no absolute
+  frame rate can be inferred.
 - `positions ok=` — nobody fell through the island or walked into the sea.
 - `finished after Ns. winner=` — a match that never resolves is a real failure
   mode, so the test waits for a winner rather than assuming one turns up. A
@@ -297,6 +297,25 @@ and an unresponsive window. The guard exists so it stays *playable*, not safe.
   the culling with no per-frame script. The body mesh itself keeps no range — it
   *is* the far-away version. Props and weapons do the same.
 - `Player._update_lod()` skips animation entirely for distant bots, on a stagger.
+- **Simulation LOD**: past `SIMPLE_MOVE_RANGE` (80 m) from *every* human, a bot
+  stops being a physics body and `_move_simply()` slides it along the path the
+  navigation agent already produced, pinned to `GROUND_Y`. Worth about 10 % of
+  physics time at a hundred bots (12.6 → 11.4 ms), which is less than it sounds
+  like it should be: `TIME_PHYSICS_PROCESS` counts every `_physics_process`
+  callback, so bot *thinking* and navigation live in that number too and
+  `move_and_slide` was only ever a slice of it.
+
+  Two things this trades away, both deliberately: distant bots no longer collide
+  with scenery (their path was routed around it anyway), and they cannot climb —
+  hence the `SIMPLE_MOVE_CEILING` check, which keeps bots still falling out of
+  the opening drop on real physics so they do not teleport to the ground
+  mid-air. `positions ok=` in the smoke test is what guards the whole thing: if
+  simplified bots ever start walking into the sea, that line catches it.
+
+  Note the two distances are asked of different things on purpose — what to
+  *draw* is measured from this screen's camera, what to *simulate* from the
+  nearest human anywhere, because in co-op the other player may be stood next to
+  a bot this machine considers distant.
 
 ### Collision layers
 
